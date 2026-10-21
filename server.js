@@ -275,6 +275,7 @@ app.post('/login', (req, res) => {
   req.session.userId = user.id;
   req.session.role = user.role;
   req.session.attendanceCode = user.attendance_code;
+  req.session.qrToken = token || null;
   logOperation(user.id, user.attendance_code, user.role, 'LOGIN', 'ログイン成功', req.ip);
 
   // QRから来た場合は出勤登録確認画面へ
@@ -325,7 +326,7 @@ app.get('/qr-reader', (req, res) => {
 // ===== 出勤登録確認画面 =====
 app.get('/confirm', requireLogin, (req, res) => {
   if (req.session.role === 'admin') return res.redirect('/admin');
-  const token = req.query.token;
+  const token = req.query.token || req.session.qrToken;
   const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
   if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', true));
 
