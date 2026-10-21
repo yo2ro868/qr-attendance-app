@@ -287,10 +287,22 @@ app.get('/home', requireLogin, (req, res) => {
         <small>※ 氏名・職員ID・所属はこのシステムには表示されません。</small>
       </div>
       <div id="reader" style="width:100%; max-width:400px; margin:20px auto;"></div>
-        <a href="/qr-scan" class="btn btn-success" style="display:inline-block; padding:16px 40px; font-size:1.1rem;">
-          📷 QRコードを読み取る
-        </a>
-      </p>
+      <p id="result" style="text-align:center; color:red;"></p>
+      <script src="https://unpkg.com/html5-qrcode"></script>
+      <script>
+        const html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText) => {
+            html5QrCode.stop();
+            window.location.href = decodedText;
+          },
+          (err) => {}
+        ).catch(err => {
+          document.getElementById('result').textContent = 'カメラの起動に失敗しました。ブラウザのカメラ許可を確認してください。';
+        });
+      </script>
     </div>
   `, true));
 });
