@@ -1,4 +1,4 @@
-// server.js — QRコード式出勤管理アプリ 新フロー版
+// server.js — QRコード式出勤管理アプリ（位置情報なし版）
 
 const express = require('express');
 const session = require('express-session');
@@ -29,9 +29,6 @@ async function initDB() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       qr_token TEXT NOT NULL UNIQUE,
-      latitude REAL,
-      longitude REAL,
-      allowed_radius_m INTEGER DEFAULT 150,
       is_active INTEGER DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -52,13 +49,6 @@ async function initDB() {
       attendance_date TEXT NOT NULL,
       attendance_time TEXT NOT NULL,
       registered_at TEXT NOT NULL,
-      latitude REAL,
-      longitude REAL,
-      location_accuracy REAL,
-      distance_m REAL,
-      location_judgement TEXT,
-      status TEXT NOT NULL,
-      memo TEXT,
       device_info TEXT,
       ip_address TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -90,8 +80,7 @@ async function initDB() {
     { name: '次室',          token: 'loc-011' },
   ];
   for (const l of locations) {
-    db.run(`INSERT OR IGNORE INTO qr_locations (name, qr_token, latitude, longitude) VALUES (?, ?, ?, ?)`,
-      [l.name, l.token, 35.681236, 139.767125]);
+    db.run(`INSERT OR IGNORE INTO qr_locations (name, qr_token) VALUES (?, ?)`, [l.name, l.token]);
   }
 
   const initialUsers = [
@@ -168,14 +157,6 @@ function logOperation(userId, code, role, action, detail, ip) {
     [userId || null, code || null, role || null, action, detail || null, ip || null]);
 }
 
-function calcDistance(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
 function layout(title, body, user) {
   const nav = user ? `<header><h1>出勤管理システム</h1><a href="/logout">ログアウト</a></header>` : '';
   return `<!DOCTYPE html>
@@ -190,20 +171,15 @@ function layout(title, body, user) {
 </html>`;
 }
 
-// ===== QRコード読み取り画面（ログイン前） =====
-// スマホでQRを読み取ると /scan/:token に飛ぶ
-// ログインしていない場合はログイン画面にリダイレクト（tokenを保持）
+// ===== QRコード読み取り =====
 app.get('/scan/:token', (req, res) => {
   const token = req.params.token;
   const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
   if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', false));
 
-  // ログイン済みの場合は直接出勤登録確認画面へ
   if (req.session.userId) {
     return res.redirect(`/confirm?token=${token}`);
   }
-
-  // 未ログインの場合はログイン画面へ（tokenを保持）
   res.redirect(`/?token=${token}`);
 });
 
@@ -216,7 +192,6 @@ app.get('/', (req, res) => {
   const token = req.query.token || '';
   const error = req.query.error ? '<div class="message message-error">IDまたはパスワードが正しくありません</div>' : '';
 
-  // QRから来た場合は設置場所名を表示
   let locationInfo = '';
   if (token) {
     const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
@@ -278,11 +253,9 @@ app.post('/login', (req, res) => {
   req.session.qrToken = token || null;
   logOperation(user.id, user.attendance_code, user.role, 'LOGIN', 'ログイン成功', req.ip);
 
-  // QRから来た場合は出勤登録確認画面へ
   if (token) {
     return res.redirect(`/confirm?token=${token}`);
   }
-
   res.redirect(user.role === 'admin' ? '/admin' : '/home');
 });
 
@@ -293,7 +266,7 @@ app.get('/logout', requireLogin, (req, res) => {
   res.redirect('/');
 });
 
-// ===== QRコードリーダー画面（ログイン画面からのリンク用） =====
+// ===== QRコードリーダー画面 =====
 app.get('/qr-reader', (req, res) => {
   res.send(layout('QRコード読み取り', `
     <div class="card">
@@ -341,43 +314,11 @@ app.get('/confirm', requireLogin, (req, res) => {
         <span class="label">QR設置場所</span>
         <span class="value">${loc.name}</span>
       </div>
-      <div class="message message-info" style="margin-top:16px; font-size:0.85rem;">
-        位置情報を取得して登録します。取得できない場合や範囲外でも登録は完了しますが「要確認」となります。
-      </div>
-      <form id="attendanceForm" method="POST" action="/api/attendance">
+      <form method="POST" action="/api/attendance" style="margin-top:24px;">
         <input type="hidden" name="qr_token" value="${loc.qr_token}">
-        <input type="hidden" name="latitude" id="lat">
-        <input type="hidden" name="longitude" id="lng">
-        <input type="hidden" name="accuracy" id="acc">
-        <button type="button" onclick="getLocationAndSubmit()" class="btn btn-success" style="margin-top:20px;">
-          ✅ 出勤登録する
-        </button>
+        <button type="submit" class="btn btn-success">✅ 出勤登録する</button>
       </form>
     </div>
-    <script>
-    function getLocationAndSubmit() {
-      const btn = document.querySelector('button');
-      btn.disabled = true;
-      btn.textContent = '位置情報取得中...';
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          pos => {
-            document.getElementById('lat').value = pos.coords.latitude;
-            document.getElementById('lng').value = pos.coords.longitude;
-            document.getElementById('acc').value = pos.coords.accuracy;
-            document.getElementById('attendanceForm').submit();
-          },
-          (err) => {
-            console.warn('位置情報取得失敗:', err.message);
-            document.getElementById('attendanceForm').submit();
-          },
-          { timeout: 15000, enableHighAccuracy: true, maximumAge: 0 }
-        );
-      } else {
-        document.getElementById('attendanceForm').submit();
-      }
-    }
-    </script>
   `, true));
 });
 
@@ -414,7 +355,7 @@ app.get('/home', requireLogin, (req, res) => {
 
 // ===== 出勤登録API =====
 app.post('/api/attendance', requireLogin, (req, res) => {
-  const { qr_token, latitude, longitude, accuracy } = req.body;
+  const { qr_token } = req.body;
   const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [qr_token]);
   if (!loc) return res.redirect('/home');
 
@@ -423,33 +364,16 @@ app.post('/api/attendance', requireLogin, (req, res) => {
   const date = jstNow.toISOString().slice(0, 10);
   const time = jstNow.toISOString().slice(11, 19);
 
-  let distanceM = null, judgement = '位置情報未取得', status = '要確認';
-  const lat = parseFloat(latitude), lng = parseFloat(longitude), acc = parseFloat(accuracy);
-
-  if (!isNaN(lat) && !isNaN(lng)) {
-    if (loc.latitude && loc.longitude) {
-      distanceM = Math.round(calcDistance(lat, lng, loc.latitude, loc.longitude));
-      judgement = distanceM <= loc.allowed_radius_m ? '範囲内' : '範囲外';
-      status = distanceM <= loc.allowed_radius_m ? '正常' : '要確認';
-    } else {
-      judgement = '基準未設定';
-    }
-  }
-
   const newId = dbInsert(
     `INSERT INTO attendance_records
-     (user_id, attendance_code, qr_location_id, attendance_date, attendance_time,
-      registered_at, latitude, longitude, location_accuracy, distance_m,
-      location_judgement, status, device_info, ip_address)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (user_id, attendance_code, qr_location_id, attendance_date, attendance_time, registered_at, device_info, ip_address)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [req.session.userId, req.session.attendanceCode, loc.id,
      date, time, now.toISOString(),
-     isNaN(lat) ? null : lat, isNaN(lng) ? null : lng, isNaN(acc) ? null : acc,
-     distanceM, judgement, status,
      req.headers['user-agent'], req.ip]
   );
 
-  logOperation(req.session.userId, req.session.attendanceCode, 'staff', 'ATTENDANCE', `場所:${loc.name} 状態:${status}`, req.ip);
+  logOperation(req.session.userId, req.session.attendanceCode, 'staff', 'ATTENDANCE', `場所:${loc.name}`, req.ip);
   res.redirect(`/attendance-complete?id=${newId}`);
 });
 
@@ -462,20 +386,13 @@ app.get('/attendance-complete', requireLogin, (req, res) => {
   );
   if (!rec || rec.user_id != req.session.userId) return res.redirect('/home');
 
-  const statusClass = rec.status === '正常' ? 'message-success' : 'message-warning';
   res.send(layout('出勤登録完了', `
     <div class="card">
       <h2>出勤登録完了</h2>
-      <div class="message ${statusClass}">
-        ${rec.status === '正常' ? '✅ 正常に登録されました' : '⚠️ 登録されましたが「要確認」です'}
-      </div>
+      <div class="message message-success">✅ 出勤登録が完了しました</div>
       <div class="confirm-item"><span class="label">出勤日</span><span class="value">${rec.attendance_date}</span></div>
       <div class="confirm-item"><span class="label">出勤時刻</span><span class="value">${rec.attendance_time}</span></div>
       <div class="confirm-item"><span class="label">QR設置場所</span><span class="value">${rec.location_name}</span></div>
-      <div class="confirm-item"><span class="label">位置判定</span><span class="value">${rec.location_judgement}</span></div>
-      <div class="confirm-item"><span class="label">登録状態</span>
-        <span class="value"><span class="badge ${rec.status === '正常' ? 'badge-normal' : 'badge-caution'}">${rec.status}</span></span>
-      </div>
       <p style="margin-top:24px; text-align:center;">
         <a href="/logout" class="btn btn-secondary" style="display:inline-block;">ログアウト</a>
       </p>
@@ -508,14 +425,13 @@ app.get('/admin', requireAdmin, (req, res) => {
 
 // ===== 管理者：出勤状況一覧 =====
 app.get('/admin/attendance', requireAdmin, (req, res) => {
-  const { start, end, location, status, code } = req.query;
+  const { start, end, location, code } = req.query;
   let sql = `SELECT r.*, l.name as location_name FROM attendance_records r
              JOIN qr_locations l ON r.qr_location_id = l.id WHERE 1=1`;
   const params = [];
   if (start)    { sql += ' AND r.attendance_date >= ?'; params.push(start); }
   if (end)      { sql += ' AND r.attendance_date <= ?'; params.push(end); }
   if (location) { sql += ' AND r.qr_location_id = ?'; params.push(location); }
-  if (status)   { sql += ' AND r.status = ?'; params.push(status); }
   if (code)     { sql += ' AND r.attendance_code = ?'; params.push(code); }
   sql += ' ORDER BY r.registered_at DESC LIMIT 500';
 
@@ -528,9 +444,6 @@ app.get('/admin/attendance', requireAdmin, (req, res) => {
       <td>${r.location_name}</td>
       <td>${r.attendance_date}</td>
       <td>${r.attendance_time}</td>
-      <td><span class="badge ${r.status === '正常' ? 'badge-normal' : 'badge-caution'}">${r.status}</span></td>
-      <td>${r.location_judgement || '-'}</td>
-      <td>${r.distance_m !== null ? r.distance_m + 'm' : '-'}</td>
       <td><a href="/admin/attendance/${r.id}">詳細</a></td>
     </tr>`).join('');
 
@@ -544,20 +457,15 @@ app.get('/admin/attendance', requireAdmin, (req, res) => {
         <input type="date" name="start" value="${start||''}">
         <input type="date" name="end" value="${end||''}">
         <select name="location"><option value="">全場所</option>${locOptions}</select>
-        <select name="status">
-          <option value="">全状態</option>
-          <option value="正常" ${status==='正常'?'selected':''}>正常</option>
-          <option value="要確認" ${status==='要確認'?'selected':''}>要確認</option>
-        </select>
         <input type="text" name="code" value="${code||''}" placeholder="出勤用ID">
         <button type="submit">絞り込み</button>
       </form>
       <div class="table-wrapper">
         <table>
           <thead>
-            <tr><th>出勤用ID</th><th>QR設置場所</th><th>出勤日</th><th>出勤時刻</th><th>状態</th><th>位置判定</th><th>距離</th><th>詳細</th></tr>
+            <tr><th>出勤用ID</th><th>QR設置場所</th><th>出勤日</th><th>出勤時刻</th><th>詳細</th></tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="8" style="text-align:center">データがありません</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="5" style="text-align:center">データがありません</td></tr>'}</tbody>
         </table>
       </div>
       <p style="margin-top:16px;">
@@ -577,17 +485,11 @@ app.get('/admin/attendance/excel', requireAdmin, async (req, res) => {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('出勤記録');
   sheet.columns = [
-    { header: '出勤用ID',   key: 'attendance_code',   width: 12 },
-    { header: 'QR設置場所', key: 'location_name',      width: 20 },
-    { header: '出勤日',     key: 'attendance_date',    width: 14 },
-    { header: '出勤時刻',   key: 'attendance_time',    width: 12 },
-    { header: '状態',       key: 'status',             width: 10 },
-    { header: '位置判定',   key: 'location_judgement', width: 14 },
-    { header: '距離m',      key: 'distance_m',         width: 10 },
-    { header: '緯度',       key: 'latitude',           width: 14 },
-    { header: '経度',       key: 'longitude',          width: 14 },
-    { header: '登録日時',   key: 'registered_at',      width: 22 },
-    { header: '備考',       key: 'memo',               width: 20 },
+    { header: '出勤用ID',   key: 'attendance_code', width: 12 },
+    { header: 'QR設置場所', key: 'location_name',   width: 20 },
+    { header: '出勤日',     key: 'attendance_date', width: 14 },
+    { header: '出勤時刻',   key: 'attendance_time', width: 12 },
+    { header: '登録日時',   key: 'registered_at',   width: 22 },
   ];
   sheet.getRow(1).font = { bold: true };
   records.forEach(r => sheet.addRow(r));
@@ -607,22 +509,18 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
   );
   if (!rec) return res.redirect('/admin/attendance');
   const items = [
-    ['出勤用ID', rec.attendance_code], ['QR設置場所', rec.location_name],
-    ['出勤日', rec.attendance_date],   ['出勤時刻', rec.attendance_time],
+    ['出勤用ID', rec.attendance_code],
+    ['QR設置場所', rec.location_name],
+    ['出勤日', rec.attendance_date],
+    ['出勤時刻', rec.attendance_time],
     ['登録日時', rec.registered_at],
-    ['状態', `<span class="badge ${rec.status==='正常'?'badge-normal':'badge-caution'}">${rec.status}</span>`],
-    ['位置判定', rec.location_judgement||'-'],
-    ['距離', rec.distance_m!==null?rec.distance_m+'m':'-'],
-    ['緯度', rec.latitude||'-'], ['経度', rec.longitude||'-'],
-    ['位置精度', rec.location_accuracy?rec.location_accuracy+'m':'-'],
-    ['IPアドレス', rec.ip_address||'-'],
-    ['端末情報', rec.device_info||'-'],
-    ['備考', rec.memo||'-'],
+    ['IPアドレス', rec.ip_address || '-'],
+    ['端末情報', rec.device_info || '-'],
   ];
   res.send(layout('出勤詳細', `
     <div class="card">
       <h2>出勤詳細</h2>
-      ${items.map(([l,v])=>`<div class="confirm-item"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}
+      ${items.map(([l,v]) => `<div class="confirm-item"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}
       <p style="margin-top:20px;">
         <a href="/admin/attendance" class="btn btn-secondary" style="display:inline-block; width:auto;">← 一覧へ戻る</a>
       </p>
