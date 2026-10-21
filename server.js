@@ -548,7 +548,7 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
   `, true));
 });
 
-// ===== QRコード管理 =====
+// ===== 管理者：ユーザー管理 =====
 app.get('/admin/qr', requireAdmin, async (req, res) => {
   const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
   const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
