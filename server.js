@@ -286,8 +286,8 @@ app.get('/home', requireLogin, (req, res) => {
         QRコードを読み取って出勤登録を行ってください。<br>
         <small>※ 氏名・職員ID・所属はこのシステムには表示されません。</small>
       </div>
-      <div id="reader" style="width:100%; max-width:400px; margin:20px auto;"></div>
-        <a href="/scan/loc-001" class="btn btn-success" style="display:inline-block; padding:16px 40px; font-size:1.1rem;">
+      <p style="text-align:center; margin:20px 0;">
+        <a href="/qr-scan" class="btn btn-success" style="display:inline-block; padding:16px 40px; font-size:1.1rem;">
           📷 QRコードを読み取る
         </a>
       </p>
@@ -354,8 +354,9 @@ app.post('/api/attendance', requireLogin, (req, res) => {
   if (!loc) return res.redirect('/home');
 
   const now = new Date();
-  const date = now.toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
-  const time = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const date = jstNow.toISOString().slice(0, 10);
+  const time = jstNow.toISOString().slice(11, 19);
 
   let distanceM = null, judgement = '位置情報未取得', status = '要確認';
   const lat = parseFloat(latitude), lng = parseFloat(longitude), acc = parseFloat(accuracy);
@@ -560,7 +561,7 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
 
 app.get('/admin/qr', requireAdmin, async (req, res) => {
   const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
-  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
   const qrItems = await Promise.all(locs.map(async l => {
     const url = `${baseUrl}/scan/${l.qr_token}`;
     const qrDataUrl = await QRCode.toDataURL(url, { width: 180 });
