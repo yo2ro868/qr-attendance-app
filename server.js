@@ -560,7 +560,7 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
 
 app.get('/admin/qr', requireAdmin, async (req, res) => {
   const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
-  const baseUrl = `http://192.168.68.102:3000`;
+  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
   const qrItems = await Promise.all(locs.map(async l => {
     const url = `${baseUrl}/scan/${l.qr_token}`;
     const qrDataUrl = await QRCode.toDataURL(url, { width: 180 });
