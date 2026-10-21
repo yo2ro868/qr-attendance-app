@@ -438,6 +438,9 @@ app.get('/admin', requireAdmin, (req, res) => {
         <a href="/admin/attendance/excel" class="admin-menu-item">
           <div class="icon">📊</div><div class="title">Excel出力</div>
         </a>
+        <a href="/admin/users" class="admin-menu-item">
+          <div class="icon">👥</div><div class="title">ユーザー管理</div>
+        </a>
       </div>
     </div>
   `, true));
@@ -549,6 +552,106 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
 });
 
 // ===== 管理者：ユーザー管理 =====
+app.get('/admin/users', requireAdmin, (req, res) => {
+  const result = req.query.result ? decodeURIComponent(req.query.result) : '';
+  const users = dbAll(`SELECT id, attendance_code, role, is_active, created_at FROM users ORDER BY attendance_code`);
+  const rows = users.map(u => `
+    <tr>
+      <td>${u.attendance_code}</td>
+      <td>${u.role === 'admin' ? '管理者' : '職員'}</td>
+      <td><span class="badge ${u.is_active ? 'badge-normal' : 'badge-caution'}">${u.is_active ? '有効' : '無効'}</span></td>
+      <td>${u.created_at}</td>
+    </tr>`).join('');
+
+  res.send(layout('ユーザー管理', `
+    <div class="card">
+      <h2>CSVで一括登録</h2>
+      ${result ? `<div class="message message-success">✅ ${result}</div>` : ''}
+      <div class="message message-info" style="font-size:0.85rem;">
+        CSVファイルの形式：<strong>出勤用ID,パスワード,権限</strong><br>
+        権限は <code>staff</code>（職員）または <code>admin</code>（管理者）<br>
+        例：<code>1234,user123,staff</code><br>
+        ※ 既に登録済みのIDはスキップされます
+      </div>
+      <form id="uploadForm" method="POST" action="/admin/users/upload" enctype="multipart/form-data" style="margin-bottom:24px;">
+        <div class="form-group">
+          <label>CSVファイルを選択</label>
+          <input type="file" name="csv" accept=".csv" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">
+          📤 アップロードして登録
+        </button>
+      </form>
+      <h2>登録済みユーザー一覧（${users.length}名）</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr><th>出勤用ID</th><th>権限</th><th>状態</th><th>登録日時</th></tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="4" style="text-align:center">データがありません</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `, true));
+});
+
+app.post('/admin/users/upload', requireAdmin, (req, res) => {
+  let body = '';
+  req.on('data', chunk => { body += chunk.toString('binary'); });
+  req.on('end', () => {
+    const boundary = req.headers['content-type'].split('boundary=')[1];
+    const parts = body.split('--' + boundary);
+
+    let csvContent = '';
+    for (const part of parts) {
+      if (part.includes('filename=') && part.includes('.csv')) {
+        const lines = part.split('\r\n');
+        const dataStart = lines.findIndex(l => l === '') + 1;
+        csvContent = lines.slice(dataStart).join('\n').trim();
+        break;
+      }
+    }
+
+    if (!csvContent) {
+      return res.redirect('/admin/users?result=' + encodeURIComponent('CSVファイルが読み込めませんでした'));
+    }
+
+    const lines = csvContent.split('\n').filter(l => l.trim());
+    let success = 0, skipped = 0, errors = 0;
+
+    for (const line of lines) {
+      const cols = line.trim().split(',');
+      if (cols.length < 2) { errors++; continue; }
+
+      const code = cols[0].trim().replace(/^0+/, '').padStart(4, '0');
+      const pass = cols[1].trim();
+      const role = (cols[2] || 'staff').trim();
+
+      if (!code || !pass) { errors++; continue; }
+      if (!['staff', 'admin'].includes(role)) { errors++; continue; }
+
+      const exists = dbGet('SELECT id FROM users WHERE attendance_code = ?', [code]);
+      if (exists) { skipped++; continue; }
+
+      try {
+        const hash = bcrypt.hashSync(pass, 10);
+        dbInsert(`INSERT INTO users (attendance_code, login_id, password_hash, role) VALUES (?, ?, ?, ?)`,
+          [code, code, hash, role]);
+        success++;
+      } catch (e) {
+        errors++;
+      }
+    }
+
+    logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'CSV_UPLOAD',
+      `成功:${success} スキップ:${skipped} エラー:${errors}`, req.ip);
+
+    const resultMsg = encodeURIComponent(`登録成功:${success}名 / スキップ(重複):${skipped}名 / エラー:${errors}件`);
+    res.redirect(`/admin/users?result=${resultMsg}`);
+  });
+});
+
+// ===== QRコード管理 =====
 app.get('/admin/qr', requireAdmin, async (req, res) => {
   const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
   const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
