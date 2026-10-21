@@ -561,6 +561,13 @@ app.get('/admin/users', requireAdmin, (req, res) => {
       <td>${u.role === 'admin' ? '管理者' : '職員'}</td>
       <td><span class="badge ${u.is_active ? 'badge-normal' : 'badge-caution'}">${u.is_active ? '有効' : '無効'}</span></td>
       <td>${u.created_at}</td>
+      <td>
+        <a href="/admin/users/${u.id}/edit" style="color:#4f46e5; font-size:0.85rem; margin-right:8px;">編集</a>
+        <a href="/admin/users/${u.id}/toggle" style="color:${u.is_active ? '#ef4444' : '#22c55e'}; font-size:0.85rem;"
+           onclick="return confirm('${u.is_active ? '無効にしますか？' : '有効にしますか？'}')">
+          ${u.is_active ? '無効化' : '有効化'}
+        </a>
+      </td>
     </tr>`).join('');
 
   res.send(layout('ユーザー管理', `
@@ -586,9 +593,9 @@ app.get('/admin/users', requireAdmin, (req, res) => {
       <div class="table-wrapper">
         <table>
           <thead>
-            <tr><th>出勤用ID</th><th>権限</th><th>状態</th><th>登録日時</th></tr>
+            <tr><th>出勤用ID</th><th>権限</th><th>状態</th><th>登録日時</th><th>操作</th></tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="4" style="text-align:center">データがありません</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="5" style="text-align:center">データがありません</td></tr>'}</tbody>
         </table>
       </div>
     </div>
@@ -649,6 +656,88 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
     const resultMsg = encodeURIComponent(`登録成功:${success}名 / スキップ(重複):${skipped}名 / エラー:${errors}件`);
     res.redirect(`/admin/users?result=${resultMsg}`);
   });
+});
+
+// ユーザー編集画面
+app.get('/admin/users/:id/edit', requireAdmin, (req, res) => {
+  const user = dbGet('SELECT * FROM users WHERE id = ?', [req.params.id]);
+  if (!user) return res.redirect('/admin/users');
+
+  const msg = req.query.result ? `<div class="message message-success">✅ ${decodeURIComponent(req.query.result)}</div>` : '';
+
+  res.send(layout('ユーザー編集', `
+    <div class="card">
+      <h2>ユーザー編集</h2>
+      ${msg}
+      <div class="confirm-item">
+        <span class="label">出勤用ID</span>
+        <span class="value">${user.attendance_code}</span>
+      </div>
+
+      <div style="margin-top:24px;">
+        <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">パスワード変更</h3>
+        <form method="POST" action="/admin/users/${user.id}/password" style="margin-bottom:20px;">
+          <div class="form-group">
+            <label>新しいパスワード</label>
+            <input type="password" name="password" required minlength="6" placeholder="6文字以上">
+          </div>
+          <div class="form-group">
+            <label>確認用パスワード</label>
+            <input type="password" name="password_confirm" required minlength="6" placeholder="もう一度入力">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">🔑 パスワード変更</button>
+        </form>
+
+        <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">権限変更</h3>
+        <form method="POST" action="/admin/users/${user.id}/role">
+          <div class="form-group">
+            <label>権限</label>
+            <select name="role">
+              <option value="staff" ${user.role === 'staff' ? 'selected' : ''}>職員</option>
+              <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>管理者</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">👤 権限変更</button>
+        </form>
+      </div>
+
+      <p style="margin-top:24px;">
+        <a href="/admin/users" class="btn btn-secondary" style="display:inline-block; width:auto;">← 一覧へ戻る</a>
+      </p>
+    </div>
+  `, true));
+});
+
+// パスワード変更処理
+app.post('/admin/users/:id/password', requireAdmin, (req, res) => {
+  const { password, password_confirm } = req.body;
+  if (password !== password_confirm) {
+    return res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('パスワードが一致しません')}`);
+  }
+  const hash = bcrypt.hashSync(password, 10);
+  dbRun('UPDATE users SET password_hash = ? WHERE id = ?', [hash, req.params.id]);
+  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'PASSWORD_CHANGE', `対象ID:${req.params.id}`, req.ip);
+  res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('パスワードを変更しました')}`);
+});
+
+// 権限変更処理
+app.post('/admin/users/:id/role', requireAdmin, (req, res) => {
+  const { role } = req.body;
+  if (!['staff', 'admin'].includes(role)) return res.redirect('/admin/users');
+  dbRun('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
+  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'ROLE_CHANGE', `対象ID:${req.params.id} 権限:${role}`, req.ip);
+  res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('権限を変更しました')}`);
+});
+
+// 有効/無効切り替え
+app.get('/admin/users/:id/toggle', requireAdmin, (req, res) => {
+  const user = dbGet('SELECT * FROM users WHERE id = ?', [req.params.id]);
+  if (!user) return res.redirect('/admin/users');
+  const newStatus = user.is_active ? 0 : 1;
+  dbRun('UPDATE users SET is_active = ? WHERE id = ?', [newStatus, req.params.id]);
+  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_TOGGLE',
+    `対象ID:${req.params.id} 状態:${newStatus ? '有効' : '無効'}`, req.ip);
+  res.redirect('/admin/users');
 });
 
 // ===== QRコード管理 =====
