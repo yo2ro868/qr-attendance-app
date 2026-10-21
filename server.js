@@ -225,11 +225,29 @@ app.get('/', (req, res) => {
         <label>パスワード</label>
         <input type="password" name="password" required>
       </div>
-      <button type="submit" class="btn btn-primary">ログイン</button>
+      <button type="submit" class="btn btn-primary" style="font-size:1.2rem; padding:16px; margin-top:8px;">
+        🔑 ログイン
+      </button>
     </form>
-    <p style="text-align:center; margin-top:20px;">
-      <a href="/qr-reader" style="color:#4f46e5; font-size:0.9rem;">📷 QRコードを読み取る</a>
+
+    ${!token ? `
+    <div style="margin-top:28px; border-top:1px solid #e0e7ff; padding-top:20px;">
+      <p style="text-align:center; color:#666; font-size:0.85rem; margin-bottom:12px;">
+        ── まだQRコードを読み取っていない場合 ──
+      </p>
+      <a href="/qr-reader" class="btn-qr-link">
+        <span style="font-size:2rem;">📷</span>
+        <span>
+          <strong>QRコードを読み取る</strong><br>
+          <small>出勤場所のQRコードをカメラで読み取ってから<br>ログインする場合はこちら</small>
+        </span>
+      </a>
+    </div>
+    ` : `
+    <p style="text-align:center; margin-top:16px; color:#888; font-size:0.8rem;">
+      ✅ QRコード読み取り済み・ログインして登録を完了してください
     </p>
+    `}
   </div>
 </div>
 </body>
@@ -316,7 +334,9 @@ app.get('/confirm', requireLogin, (req, res) => {
       </div>
       <form method="POST" action="/api/attendance" style="margin-top:24px;">
         <input type="hidden" name="qr_token" value="${loc.qr_token}">
-        <button type="submit" class="btn btn-success">✅ 出勤登録する</button>
+        <button type="submit" class="btn btn-success" style="font-size:1.2rem; padding:18px;">
+          ✅ 出勤登録する
+        </button>
       </form>
     </div>
   `, true));
