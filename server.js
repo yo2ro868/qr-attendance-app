@@ -286,7 +286,7 @@ app.get('/home', requireLogin, (req, res) => {
         QRコードを読み取って出勤登録を行ってください。<br>
         <small>※ 氏名・職員ID・所属はこのシステムには表示されません。</small>
       </div>
-      <p style="text-align:center; margin:20px 0;">
+      <div id="reader" style="width:100%; max-width:400px; margin:20px auto;"></div>
         <a href="/scan/loc-001" class="btn btn-success" style="display:inline-block; padding:16px 40px; font-size:1.1rem;">
           📷 QRコードを読み取る
         </a>
