@@ -1,4 +1,4 @@
-// server.js — QRコード式出勤管理アプリ（sql.js版）
+// server.js — QRコード式出勤管理アプリ 新フロー版
 
 const express = require('express');
 const session = require('express-session');
@@ -10,7 +10,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'attendance.db');
 
 // ===== DB初期化 =====
@@ -18,10 +18,8 @@ let db;
 
 async function initDB() {
   const SQL = await initSqlJs();
-
   if (fs.existsSync(DB_FILE)) {
-    const fileBuffer = fs.readFileSync(DB_FILE);
-    db = new SQL.Database(fileBuffer);
+    db = new SQL.Database(fs.readFileSync(DB_FILE));
   } else {
     db = new SQL.Database();
   }
@@ -31,7 +29,6 @@ async function initDB() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       qr_token TEXT NOT NULL UNIQUE,
-      location_name TEXT,
       latitude REAL,
       longitude REAL,
       allowed_radius_m INTEGER DEFAULT 150,
@@ -77,11 +74,8 @@ async function initDB() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
-
-  // DBをファイルに保存するヘルパー
   saveDB();
 
-  // 初期データ投入
   const locations = [
     { name: '基本法制監理部', token: 'loc-001' },
     { name: '第1部',         token: 'loc-002' },
@@ -96,10 +90,8 @@ async function initDB() {
     { name: '次室',          token: 'loc-011' },
   ];
   for (const l of locations) {
-    db.run(
-      `INSERT OR IGNORE INTO qr_locations (name, qr_token, latitude, longitude) VALUES (?, ?, ?, ?)`,
-      [l.name, l.token, 35.681236, 139.767125]
-    );
+    db.run(`INSERT OR IGNORE INTO qr_locations (name, qr_token, latitude, longitude) VALUES (?, ?, ?, ?)`,
+      [l.name, l.token, 35.681236, 139.767125]);
   }
 
   const initialUsers = [
@@ -111,40 +103,29 @@ async function initDB() {
     { code: '0425', role: 'staff', pass: 'user123' },
   ];
   for (const u of initialUsers) {
-    const hash = bcrypt.hashSync(u.pass, 10);
-    db.run(
-      `INSERT OR IGNORE INTO users (attendance_code, login_id, password_hash, role) VALUES (?, ?, ?, ?)`,
-      [u.code, u.code, hash, u.role]
-    );
+    db.run(`INSERT OR IGNORE INTO users (attendance_code, login_id, password_hash, role) VALUES (?, ?, ?, ?)`,
+      [u.code, u.code, bcrypt.hashSync(u.pass, 10), u.role]);
   }
   saveDB();
 }
 
 function saveDB() {
-  const data = db.export();
-  fs.writeFileSync(DB_FILE, Buffer.from(data));
+  fs.writeFileSync(DB_FILE, Buffer.from(db.export()));
 }
 
-// ===== DBヘルパー関数 =====
 function dbGet(sql, params = []) {
   const stmt = db.prepare(sql);
   stmt.bind(params);
-  if (stmt.step()) {
-    const row = stmt.getAsObject();
-    stmt.free();
-    return row;
-  }
+  const row = stmt.step() ? stmt.getAsObject() : null;
   stmt.free();
-  return null;
+  return row;
 }
 
 function dbAll(sql, params = []) {
   const results = [];
   const stmt = db.prepare(sql);
   stmt.bind(params);
-  while (stmt.step()) {
-    results.push(stmt.getAsObject());
-  }
+  while (stmt.step()) results.push(stmt.getAsObject());
   stmt.free();
   return results;
 }
@@ -152,7 +133,6 @@ function dbAll(sql, params = []) {
 function dbRun(sql, params = []) {
   db.run(sql, params);
   saveDB();
-  return db;
 }
 
 function dbInsert(sql, params = []) {
@@ -173,39 +153,31 @@ app.use(session({
   cookie: { maxAge: 8 * 60 * 60 * 1000 }
 }));
 
-// ===== ユーティリティ =====
 function requireLogin(req, res, next) {
   if (!req.session.userId) return res.redirect('/');
   next();
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.session.userId || req.session.role !== 'admin') {
-    return res.status(403).send('管理者権限が必要です');
-  }
+  if (!req.session.userId || req.session.role !== 'admin') return res.status(403).send('管理者権限が必要です');
   next();
 }
 
 function logOperation(userId, code, role, action, detail, ip) {
-  dbRun(
-    `INSERT INTO operation_logs (user_id, attendance_code, role, action, detail, ip_address) VALUES (?, ?, ?, ?, ?, ?)`,
-    [userId || null, code || null, role || null, action, detail || null, ip || null]
-  );
+  dbRun(`INSERT INTO operation_logs (user_id, attendance_code, role, action, detail, ip_address) VALUES (?, ?, ?, ?, ?, ?)`,
+    [userId || null, code || null, role || null, action, detail || null, ip || null]);
 }
 
 function calcDistance(lat1, lng1, lat2, lng2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 +
-    Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLng/2)**2;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
 function layout(title, body, user) {
-  const nav = user
-    ? `<header><h1>出勤管理システム</h1><a href="/logout">ログアウト</a></header>`
-    : '';
+  const nav = user ? `<header><h1>出勤管理システム</h1><a href="/logout">ログアウト</a></header>` : '';
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -218,12 +190,41 @@ function layout(title, body, user) {
 </html>`;
 }
 
-// ===== ルーティング =====
+// ===== QRコード読み取り画面（ログイン前） =====
+// スマホでQRを読み取ると /scan/:token に飛ぶ
+// ログインしていない場合はログイン画面にリダイレクト（tokenを保持）
+app.get('/scan/:token', (req, res) => {
+  const token = req.params.token;
+  const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
+  if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', false));
 
+  // ログイン済みの場合は直接出勤登録確認画面へ
+  if (req.session.userId) {
+    return res.redirect(`/confirm?token=${token}`);
+  }
+
+  // 未ログインの場合はログイン画面へ（tokenを保持）
+  res.redirect(`/?token=${token}`);
+});
+
+// ===== ログイン画面 =====
 app.get('/', (req, res) => {
   if (req.session.userId) {
     return res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
   }
+
+  const token = req.query.token || '';
+  const error = req.query.error ? '<div class="message message-error">IDまたはパスワードが正しくありません</div>' : '';
+
+  // QRから来た場合は設置場所名を表示
+  let locationInfo = '';
+  if (token) {
+    const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
+    if (loc) {
+      locationInfo = `<div class="message message-info">📍 QR設置場所：<strong>${loc.name}</strong><br>ログインして出勤登録を完了してください。</div>`;
+    }
+  }
+
   res.send(`<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -237,8 +238,10 @@ app.get('/', (req, res) => {
   <div class="login-card">
     <h2>出勤管理システム</h2>
     <p class="subtitle">出勤用IDとパスワードでログイン</p>
-    ${req.query.error ? '<div class="message message-error">IDまたはパスワードが正しくありません</div>' : ''}
+    ${error}
+    ${locationInfo}
     <form method="POST" action="/login">
+      <input type="hidden" name="token" value="${token}">
       <div class="form-group">
         <label>出勤用ID</label>
         <input type="text" name="login_id" placeholder="例：1234" required autofocus>
@@ -249,45 +252,54 @@ app.get('/', (req, res) => {
       </div>
       <button type="submit" class="btn btn-primary">ログイン</button>
     </form>
+    <p style="text-align:center; margin-top:20px;">
+      <a href="/qr-reader" style="color:#4f46e5; font-size:0.9rem;">📷 QRコードを読み取る</a>
+    </p>
   </div>
 </div>
-</body></html>`);
+</body>
+</html>`);
 });
 
+// ===== ログイン処理 =====
 app.post('/login', (req, res) => {
-  const { login_id, password } = req.body;
+  const { login_id, password, token } = req.body;
   const user = dbGet('SELECT * FROM users WHERE login_id = ? AND is_active = 1', [login_id]);
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     logOperation(null, login_id, null, 'LOGIN_FAIL', 'ログイン失敗', req.ip);
-    return res.redirect('/?error=1');
+    const tokenParam = token ? `&token=${token}` : '';
+    return res.redirect(`/?error=1${tokenParam}`);
   }
 
   req.session.userId = user.id;
   req.session.role = user.role;
   req.session.attendanceCode = user.attendance_code;
-
   logOperation(user.id, user.attendance_code, user.role, 'LOGIN', 'ログイン成功', req.ip);
+
+  // QRから来た場合は出勤登録確認画面へ
+  if (token) {
+    return res.redirect(`/confirm?token=${token}`);
+  }
+
   res.redirect(user.role === 'admin' ? '/admin' : '/home');
 });
 
+// ===== ログアウト =====
 app.get('/logout', requireLogin, (req, res) => {
   logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'LOGOUT', null, req.ip);
   req.session.destroy();
   res.redirect('/');
 });
 
-app.get('/home', requireLogin, (req, res) => {
-  if (req.session.role === 'admin') return res.redirect('/admin');
-  res.send(layout('職員ホーム', `
+// ===== QRコードリーダー画面（ログイン画面からのリンク用） =====
+app.get('/qr-reader', (req, res) => {
+  res.send(layout('QRコード読み取り', `
     <div class="card">
-      <h2>出勤登録</h2>
-      <div class="message message-info">
-        QRコードを読み取って出勤登録を行ってください。<br>
-        <small>※ 氏名・職員ID・所属はこのシステムには表示されません。</small>
-      </div>
-      <div id="reader" style="width:100%; max-width:400px; margin:20px auto;"></div>
-      <p id="result" style="text-align:center; color:red;"></p>
+      <h2>QRコードを読み取る</h2>
+      <p style="color:#555; margin-bottom:16px; font-size:0.9rem;">出勤場所に掲示されているQRコードにカメラを向けてください。</p>
+      <div id="reader" style="width:100%; max-width:400px; margin:0 auto;"></div>
+      <p id="result" style="text-align:center; color:red; margin-top:12px;"></p>
       <script src="https://unpkg.com/html5-qrcode"></script>
       <script>
         const html5QrCode = new Html5Qrcode("reader");
@@ -303,13 +315,18 @@ app.get('/home', requireLogin, (req, res) => {
           document.getElementById('result').textContent = 'カメラの起動に失敗しました。ブラウザのカメラ許可を確認してください。';
         });
       </script>
+      <p style="text-align:center; margin-top:20px;">
+        <a href="/" style="color:#4f46e5; font-size:0.9rem;">← ログイン画面へ戻る</a>
+      </p>
     </div>
-  `, true));
+  `, false));
 });
 
-app.get('/scan/:token', requireLogin, (req, res) => {
+// ===== 出勤登録確認画面 =====
+app.get('/confirm', requireLogin, (req, res) => {
   if (req.session.role === 'admin') return res.redirect('/admin');
-  const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [req.params.token]);
+  const token = req.query.token;
+  const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
   if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', true));
 
   res.send(layout('出勤登録確認', `
@@ -349,8 +366,11 @@ app.get('/scan/:token', requireLogin, (req, res) => {
             document.getElementById('acc').value = pos.coords.accuracy;
             document.getElementById('attendanceForm').submit();
           },
-          () => { document.getElementById('attendanceForm').submit(); },
-          { timeout: 10000 }
+          (err) => {
+            console.warn('位置情報取得失敗:', err.message);
+            document.getElementById('attendanceForm').submit();
+          },
+          { timeout: 15000, enableHighAccuracy: true, maximumAge: 0 }
         );
       } else {
         document.getElementById('attendanceForm').submit();
@@ -360,6 +380,38 @@ app.get('/scan/:token', requireLogin, (req, res) => {
   `, true));
 });
 
+// ===== 職員ホーム（直接ログインした場合） =====
+app.get('/home', requireLogin, (req, res) => {
+  if (req.session.role === 'admin') return res.redirect('/admin');
+  res.send(layout('職員ホーム', `
+    <div class="card">
+      <h2>出勤登録</h2>
+      <div class="message message-info">
+        出勤場所のQRコードを読み取って出勤登録を行ってください。<br>
+        <small>※ 氏名・職員ID・所属はこのシステムには表示されません。</small>
+      </div>
+      <div id="reader" style="width:100%; max-width:400px; margin:20px auto;"></div>
+      <p id="result" style="text-align:center; color:red;"></p>
+      <script src="https://unpkg.com/html5-qrcode"></script>
+      <script>
+        const html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText) => {
+            html5QrCode.stop();
+            window.location.href = decodedText;
+          },
+          (err) => {}
+        ).catch(err => {
+          document.getElementById('result').textContent = 'カメラの起動に失敗しました。ブラウザのカメラ許可を確認してください。';
+        });
+      </script>
+    </div>
+  `, true));
+});
+
+// ===== 出勤登録API =====
 app.post('/api/attendance', requireLogin, (req, res) => {
   const { qr_token, latitude, longitude, accuracy } = req.body;
   const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [qr_token]);
@@ -389,19 +441,18 @@ app.post('/api/attendance', requireLogin, (req, res) => {
       registered_at, latitude, longitude, location_accuracy, distance_m,
       location_judgement, status, device_info, ip_address)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      req.session.userId, req.session.attendanceCode, loc.id,
-      date, time, now.toISOString(),
-      isNaN(lat) ? null : lat, isNaN(lng) ? null : lng, isNaN(acc) ? null : acc,
-      distanceM, judgement, status,
-      req.headers['user-agent'], req.ip
-    ]
+    [req.session.userId, req.session.attendanceCode, loc.id,
+     date, time, now.toISOString(),
+     isNaN(lat) ? null : lat, isNaN(lng) ? null : lng, isNaN(acc) ? null : acc,
+     distanceM, judgement, status,
+     req.headers['user-agent'], req.ip]
   );
 
   logOperation(req.session.userId, req.session.attendanceCode, 'staff', 'ATTENDANCE', `場所:${loc.name} 状態:${status}`, req.ip);
   res.redirect(`/attendance-complete?id=${newId}`);
 });
 
+// ===== 出勤登録完了 =====
 app.get('/attendance-complete', requireLogin, (req, res) => {
   const rec = dbGet(
     `SELECT r.*, l.name as location_name FROM attendance_records r
@@ -425,12 +476,13 @@ app.get('/attendance-complete', requireLogin, (req, res) => {
         <span class="value"><span class="badge ${rec.status === '正常' ? 'badge-normal' : 'badge-caution'}">${rec.status}</span></span>
       </div>
       <p style="margin-top:24px; text-align:center;">
-        <a href="/home" class="btn btn-secondary" style="display:inline-block;">ホームへ戻る</a>
+        <a href="/logout" class="btn btn-secondary" style="display:inline-block;">ログアウト</a>
       </p>
     </div>
   `, true));
 });
 
+// ===== 管理者ホーム =====
 app.get('/admin', requireAdmin, (req, res) => {
   res.send(layout('管理者ホーム', `
     <div class="card">
@@ -453,6 +505,7 @@ app.get('/admin', requireAdmin, (req, res) => {
   `, true));
 });
 
+// ===== 管理者：出勤状況一覧 =====
 app.get('/admin/attendance', requireAdmin, (req, res) => {
   const { start, end, location, status, code } = req.query;
   let sql = `SELECT r.*, l.name as location_name FROM attendance_records r
@@ -513,6 +566,7 @@ app.get('/admin/attendance', requireAdmin, (req, res) => {
   `, true));
 });
 
+// ===== Excel出力 =====
 app.get('/admin/attendance/excel', requireAdmin, async (req, res) => {
   const records = dbAll(
     `SELECT r.*, l.name as location_name FROM attendance_records r
@@ -540,8 +594,10 @@ app.get('/admin/attendance/excel', requireAdmin, async (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="attendance.xlsx"');
   await workbook.xlsx.write(res);
   res.end();
+  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'EXCEL_EXPORT', null, req.ip);
 });
 
+// ===== 管理者：出勤詳細 =====
 app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
   const rec = dbGet(
     `SELECT r.*, l.name as location_name FROM attendance_records r
@@ -554,10 +610,12 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
     ['出勤日', rec.attendance_date],   ['出勤時刻', rec.attendance_time],
     ['登録日時', rec.registered_at],
     ['状態', `<span class="badge ${rec.status==='正常'?'badge-normal':'badge-caution'}">${rec.status}</span>`],
-    ['位置判定', rec.location_judgement||'-'], ['距離', rec.distance_m!==null?rec.distance_m+'m':'-'],
-    ['緯度', rec.latitude||'-'],       ['経度', rec.longitude||'-'],
+    ['位置判定', rec.location_judgement||'-'],
+    ['距離', rec.distance_m!==null?rec.distance_m+'m':'-'],
+    ['緯度', rec.latitude||'-'], ['経度', rec.longitude||'-'],
     ['位置精度', rec.location_accuracy?rec.location_accuracy+'m':'-'],
-    ['IPアドレス', rec.ip_address||'-'], ['端末情報', rec.device_info||'-'],
+    ['IPアドレス', rec.ip_address||'-'],
+    ['端末情報', rec.device_info||'-'],
     ['備考', rec.memo||'-'],
   ];
   res.send(layout('出勤詳細', `
@@ -571,15 +629,17 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
   `, true));
 });
 
+// ===== QRコード管理 =====
 app.get('/admin/qr', requireAdmin, async (req, res) => {
   const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
   const qrItems = await Promise.all(locs.map(async l => {
     const url = `${baseUrl}/scan/${l.qr_token}`;
     const qrDataUrl = await QRCode.toDataURL(url, { width: 180 });
     return `<div class="qr-item">
       <img src="${qrDataUrl}" alt="${l.name}" style="width:160px;">
       <p>${l.name}</p>
+      <small style="color:#888; font-size:0.7rem; word-break:break-all;">${url}</small>
     </div>`;
   }));
   res.send(layout('QRコード管理', `
@@ -593,6 +653,7 @@ app.get('/admin/qr', requireAdmin, async (req, res) => {
   `, true));
 });
 
+// ===== 操作ログ =====
 app.get('/admin/logs', requireAdmin, (req, res) => {
   const logs = dbAll('SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 300');
   const rows = logs.map(l => `
