@@ -287,7 +287,7 @@ app.get('/home', requireLogin, (req, res) => {
         <small>※ 氏名・職員ID・所属はこのシステムには表示されません。</small>
       </div>
       <p style="text-align:center; margin:20px 0;">
-        <a href="/qr-scan" class="btn btn-success" style="display:inline-block; padding:16px 40px; font-size:1.1rem;">
+        <a href="/scan/loc-001" class="btn btn-success" style="display:inline-block; padding:16px 40px; font-size:1.1rem;">
           📷 QRコードを読み取る
         </a>
       </p>
