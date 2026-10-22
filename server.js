@@ -1,48 +1,64 @@
-// server.js — QRコード式出勤管理アプリ（位置情報なし版）
+// server.js — QRコード式出勤管理アプリ（PostgreSQL版）
 
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
-const initSqlJs = require('sql.js');
+const { Pool } = require('pg');
 const QRCode = require('qrcode');
 const ExcelJS = require('exceljs');
 const path = require('path');
-const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DB_FILE = path.join(__dirname, 'attendance.db');
+
+// ===== DB接続 =====
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+async function query(sql, params = []) {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(sql, params);
+    return result.rows;
+  } finally {
+    client.release();
+  }
+}
+
+async function queryOne(sql, params = []) {
+  const rows = await query(sql, params);
+  return rows[0] || null;
+}
 
 // ===== DB初期化 =====
-let db;
-
 async function initDB() {
-  const SQL = await initSqlJs();
-  if (fs.existsSync(DB_FILE)) {
-    db = new SQL.Database(fs.readFileSync(DB_FILE));
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run(`
+  await query(`
     CREATE TABLE IF NOT EXISTS qr_locations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       qr_token TEXT NOT NULL UNIQUE,
       is_active INTEGER DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       attendance_code TEXT NOT NULL UNIQUE,
       login_id TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL,
       is_active INTEGER DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS attendance_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
       attendance_code TEXT NOT NULL,
       qr_location_id INTEGER NOT NULL,
@@ -52,9 +68,12 @@ async function initDB() {
       device_info TEXT,
       ip_address TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS operation_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       user_id INTEGER,
       attendance_code TEXT,
       role TEXT,
@@ -62,10 +81,10 @@ async function initDB() {
       detail TEXT,
       ip_address TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
+    )
   `);
-  saveDB();
 
+  // 初期データ投入
   const locations = [
     { name: '基本法制監理部', token: 'loc-001' },
     { name: '第1部',         token: 'loc-002' },
@@ -80,7 +99,10 @@ async function initDB() {
     { name: '次室',          token: 'loc-011' },
   ];
   for (const l of locations) {
-    db.run(`INSERT OR IGNORE INTO qr_locations (name, qr_token) VALUES (?, ?)`, [l.name, l.token]);
+    await query(
+      `INSERT INTO qr_locations (name, qr_token) VALUES ($1, $2) ON CONFLICT (qr_token) DO NOTHING`,
+      [l.name, l.token]
+    );
   }
 
   const initialUsers = [
@@ -92,43 +114,14 @@ async function initDB() {
     { code: '0425', role: 'staff', pass: 'user123' },
   ];
   for (const u of initialUsers) {
-    db.run(`INSERT OR IGNORE INTO users (attendance_code, login_id, password_hash, role) VALUES (?, ?, ?, ?)`,
-      [u.code, u.code, bcrypt.hashSync(u.pass, 10), u.role]);
+    const hash = bcrypt.hashSync(u.pass, 10);
+    await query(
+      `INSERT INTO users (attendance_code, login_id, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (attendance_code) DO NOTHING`,
+      [u.code, u.code, hash, u.role]
+    );
   }
-  saveDB();
-}
 
-function saveDB() {
-  fs.writeFileSync(DB_FILE, Buffer.from(db.export()));
-}
-
-function dbGet(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
-  return row;
-}
-
-function dbAll(sql, params = []) {
-  const results = [];
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  while (stmt.step()) results.push(stmt.getAsObject());
-  stmt.free();
-  return results;
-}
-
-function dbRun(sql, params = []) {
-  db.run(sql, params);
-  saveDB();
-}
-
-function dbInsert(sql, params = []) {
-  db.run(sql, params);
-  const row = dbGet('SELECT last_insert_rowid() as id');
-  saveDB();
-  return row ? row.id : null;
+  console.log('DB初期化完了');
 }
 
 // ===== ミドルウェア =====
@@ -152,9 +145,11 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-function logOperation(userId, code, role, action, detail, ip) {
-  dbRun(`INSERT INTO operation_logs (user_id, attendance_code, role, action, detail, ip_address) VALUES (?, ?, ?, ?, ?, ?)`,
-    [userId || null, code || null, role || null, action, detail || null, ip || null]);
+async function logOperation(userId, code, role, action, detail, ip) {
+  await query(
+    `INSERT INTO operation_logs (user_id, attendance_code, role, action, detail, ip_address) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [userId || null, code || null, role || null, action, detail || null, ip || null]
+  );
 }
 
 function layout(title, body, user) {
@@ -172,29 +167,23 @@ function layout(title, body, user) {
 }
 
 // ===== QRコード読み取り =====
-app.get('/scan/:token', (req, res) => {
-  const token = req.params.token;
-  const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
+app.get('/scan/:token', async (req, res) => {
+  const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [req.params.token]);
   if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', false));
-
-  if (req.session.userId) {
-    return res.redirect(`/confirm?token=${token}`);
-  }
-  res.redirect(`/?token=${token}`);
+  if (req.session.userId) return res.redirect(`/confirm?token=${req.params.token}`);
+  res.redirect(`/?token=${req.params.token}`);
 });
 
 // ===== ログイン画面 =====
-app.get('/', (req, res) => {
-  if (req.session.userId) {
-    return res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
-  }
+app.get('/', async (req, res) => {
+  if (req.session.userId) return res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
 
   const token = req.query.token || '';
   const error = req.query.error ? '<div class="message message-error">IDまたはパスワードが正しくありません</div>' : '';
 
   let locationInfo = '';
   if (token) {
-    const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
+    const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [token]);
     if (loc) {
       locationInfo = `<div class="message message-info">📍 QR設置場所：<strong>${loc.name}</strong><br>ログインして出勤登録を完了してください。</div>`;
     }
@@ -229,7 +218,6 @@ app.get('/', (req, res) => {
         🔑 ログイン
       </button>
     </form>
-
     ${!token ? `
     <div style="margin-top:28px; border-top:1px solid #e0e7ff; padding-top:20px;">
       <p style="text-align:center; color:#666; font-size:0.85rem; margin-bottom:12px;">
@@ -242,12 +230,10 @@ app.get('/', (req, res) => {
           <small>出勤場所のQRコードをカメラで読み取ってから<br>ログインする場合はこちら</small>
         </span>
       </a>
-    </div>
-    ` : `
+    </div>` : `
     <p style="text-align:center; margin-top:16px; color:#888; font-size:0.8rem;">
       ✅ QRコード読み取り済み・ログインして登録を完了してください
-    </p>
-    `}
+    </p>`}
   </div>
 </div>
 </body>
@@ -255,12 +241,12 @@ app.get('/', (req, res) => {
 });
 
 // ===== ログイン処理 =====
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   const { login_id, password, token } = req.body;
-  const user = dbGet('SELECT * FROM users WHERE login_id = ? AND is_active = 1', [login_id]);
+  const user = await queryOne('SELECT * FROM users WHERE login_id = $1 AND is_active = 1', [login_id]);
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    logOperation(null, login_id, null, 'LOGIN_FAIL', 'ログイン失敗', req.ip);
+    await logOperation(null, login_id, null, 'LOGIN_FAIL', 'ログイン失敗', req.ip);
     const tokenParam = token ? `&token=${token}` : '';
     return res.redirect(`/?error=1${tokenParam}`);
   }
@@ -269,17 +255,15 @@ app.post('/login', (req, res) => {
   req.session.role = user.role;
   req.session.attendanceCode = user.attendance_code;
   req.session.qrToken = token || null;
-  logOperation(user.id, user.attendance_code, user.role, 'LOGIN', 'ログイン成功', req.ip);
+  await logOperation(user.id, user.attendance_code, user.role, 'LOGIN', 'ログイン成功', req.ip);
 
-  if (token) {
-    return res.redirect(`/confirm?token=${token}`);
-  }
+  if (token) return res.redirect(`/confirm?token=${token}`);
   res.redirect(user.role === 'admin' ? '/admin' : '/home');
 });
 
 // ===== ログアウト =====
-app.get('/logout', requireLogin, (req, res) => {
-  logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'LOGOUT', null, req.ip);
+app.get('/logout', requireLogin, async (req, res) => {
+  await logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'LOGOUT', null, req.ip);
   req.session.destroy();
   res.redirect('/');
 });
@@ -298,10 +282,7 @@ app.get('/qr-reader', (req, res) => {
         html5QrCode.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText) => {
-            html5QrCode.stop();
-            window.location.href = decodedText;
-          },
+          (decodedText) => { html5QrCode.stop(); window.location.href = decodedText; },
           (err) => {}
         ).catch(err => {
           document.getElementById('result').textContent = 'カメラの起動に失敗しました。ブラウザのカメラ許可を確認してください。';
@@ -315,10 +296,10 @@ app.get('/qr-reader', (req, res) => {
 });
 
 // ===== 出勤登録確認画面 =====
-app.get('/confirm', requireLogin, (req, res) => {
+app.get('/confirm', requireLogin, async (req, res) => {
   if (req.session.role === 'admin') return res.redirect('/admin');
   const token = req.query.token || req.session.qrToken;
-  const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [token]);
+  const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [token]);
   if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', true));
 
   res.send(layout('出勤登録確認', `
@@ -342,7 +323,7 @@ app.get('/confirm', requireLogin, (req, res) => {
   `, true));
 });
 
-// ===== 職員ホーム（直接ログインした場合） =====
+// ===== 職員ホーム =====
 app.get('/home', requireLogin, (req, res) => {
   if (req.session.role === 'admin') return res.redirect('/admin');
   res.send(layout('職員ホーム', `
@@ -360,10 +341,7 @@ app.get('/home', requireLogin, (req, res) => {
         html5QrCode.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 250, height: 250 } },
-          (decodedText) => {
-            html5QrCode.stop();
-            window.location.href = decodedText;
-          },
+          (decodedText) => { html5QrCode.stop(); window.location.href = decodedText; },
           (err) => {}
         ).catch(err => {
           document.getElementById('result').textContent = 'カメラの起動に失敗しました。ブラウザのカメラ許可を確認してください。';
@@ -374,9 +352,9 @@ app.get('/home', requireLogin, (req, res) => {
 });
 
 // ===== 出勤登録API =====
-app.post('/api/attendance', requireLogin, (req, res) => {
+app.post('/api/attendance', requireLogin, async (req, res) => {
   const { qr_token } = req.body;
-  const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [qr_token]);
+  const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [qr_token]);
   if (!loc) return res.redirect('/home');
 
   const now = new Date();
@@ -384,24 +362,24 @@ app.post('/api/attendance', requireLogin, (req, res) => {
   const date = jstNow.toISOString().slice(0, 10);
   const time = jstNow.toISOString().slice(11, 19);
 
-  const newId = dbInsert(
+  const result = await query(
     `INSERT INTO attendance_records
      (user_id, attendance_code, qr_location_id, attendance_date, attendance_time, registered_at, device_info, ip_address)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [req.session.userId, req.session.attendanceCode, loc.id,
      date, time, now.toISOString(),
      req.headers['user-agent'], req.ip]
   );
 
-  logOperation(req.session.userId, req.session.attendanceCode, 'staff', 'ATTENDANCE', `場所:${loc.name}`, req.ip);
-  res.redirect(`/attendance-complete?id=${newId}`);
+  await logOperation(req.session.userId, req.session.attendanceCode, 'staff', 'ATTENDANCE', `場所:${loc.name}`, req.ip);
+  res.redirect(`/attendance-complete?id=${result[0].id}`);
 });
 
 // ===== 出勤登録完了 =====
-app.get('/attendance-complete', requireLogin, (req, res) => {
-  const rec = dbGet(
+app.get('/attendance-complete', requireLogin, async (req, res) => {
+  const rec = await queryOne(
     `SELECT r.*, l.name as location_name FROM attendance_records r
-     JOIN qr_locations l ON r.qr_location_id = l.id WHERE r.id = ?`,
+     JOIN qr_locations l ON r.qr_location_id = l.id WHERE r.id = $1`,
     [req.query.id]
   );
   if (!rec || rec.user_id != req.session.userId) return res.redirect('/home');
@@ -444,19 +422,20 @@ app.get('/admin', requireAdmin, (req, res) => {
 });
 
 // ===== 管理者：出勤状況一覧 =====
-app.get('/admin/attendance', requireAdmin, (req, res) => {
+app.get('/admin/attendance', requireAdmin, async (req, res) => {
   const { start, end, location, code } = req.query;
   let sql = `SELECT r.*, l.name as location_name FROM attendance_records r
              JOIN qr_locations l ON r.qr_location_id = l.id WHERE 1=1`;
   const params = [];
-  if (start)    { sql += ' AND r.attendance_date >= ?'; params.push(start); }
-  if (end)      { sql += ' AND r.attendance_date <= ?'; params.push(end); }
-  if (location) { sql += ' AND r.qr_location_id = ?'; params.push(location); }
-  if (code)     { sql += ' AND r.attendance_code = ?'; params.push(code); }
+  let i = 1;
+  if (start)    { sql += ` AND r.attendance_date >= $${i++}`; params.push(start); }
+  if (end)      { sql += ` AND r.attendance_date <= $${i++}`; params.push(end); }
+  if (location) { sql += ` AND r.qr_location_id = $${i++}`; params.push(location); }
+  if (code)     { sql += ` AND r.attendance_code = $${i++}`; params.push(code); }
   sql += ' ORDER BY r.registered_at DESC LIMIT 500';
 
-  const records = dbAll(sql, params);
-  const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
+  const records = await query(sql, params);
+  const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1');
 
   const rows = records.map(r => `
     <tr>
@@ -500,7 +479,7 @@ app.get('/admin/attendance', requireAdmin, (req, res) => {
 
 // ===== Excel出力 =====
 app.get('/admin/attendance/excel', requireAdmin, async (req, res) => {
-  const records = dbAll(
+  const records = await query(
     `SELECT r.*, l.name as location_name FROM attendance_records r
      JOIN qr_locations l ON r.qr_location_id = l.id
      ORDER BY r.attendance_date, r.attendance_time`
@@ -520,14 +499,14 @@ app.get('/admin/attendance/excel', requireAdmin, async (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="attendance.xlsx"');
   await workbook.xlsx.write(res);
   res.end();
-  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'EXCEL_EXPORT', null, req.ip);
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'EXCEL_EXPORT', null, req.ip);
 });
 
 // ===== 管理者：出勤詳細 =====
-app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
-  const rec = dbGet(
+app.get('/admin/attendance/:id', requireAdmin, async (req, res) => {
+  const rec = await queryOne(
     `SELECT r.*, l.name as location_name FROM attendance_records r
-     JOIN qr_locations l ON r.qr_location_id = l.id WHERE r.id = ?`,
+     JOIN qr_locations l ON r.qr_location_id = l.id WHERE r.id = $1`,
     [req.params.id]
   );
   if (!rec) return res.redirect('/admin/attendance');
@@ -551,10 +530,165 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
   `, true));
 });
 
+// ===== QRコード管理 =====
+app.get('/admin/qr', requireAdmin, async (req, res) => {
+  const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1');
+  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
+  const qrItems = await Promise.all(locs.map(async l => {
+    const url = `${baseUrl}/scan/${l.qr_token}`;
+    const qrDataUrl = await QRCode.toDataURL(url, { width: 200 });
+    const mailBody = encodeURIComponent(`出勤登録用QRコードをお送りします。\n\n設置場所：${l.name}\n\nQRコードURL：${url}\n\nスマートフォンのカメラでQRコードを読み取るか、上記URLにアクセスして出勤登録を行ってください。`);
+    const mailSubject = encodeURIComponent(`【出勤管理】${l.name} QRコードのご案内`);
+    return `
+      <div class="qr-item">
+        <p style="font-weight:bold; font-size:1rem; color:#333; margin-bottom:8px;">${l.name}</p>
+        <img src="${qrDataUrl}" alt="${l.name}" style="width:180px; display:block; margin:0 auto;">
+        <small style="color:#888; font-size:0.7rem; word-break:break-all; display:block; margin:8px 0;">${url}</small>
+        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
+          <a href="/admin/qr/print/${l.qr_token}" target="_blank"
+             style="background:#4f46e5; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; text-decoration:none;">
+            🖨️ 印刷
+          </a>
+          <a href="mailto:?subject=${mailSubject}&body=${mailBody}"
+             style="background:#22c55e; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; text-decoration:none;">
+            📧 メール
+          </a>
+        </div>
+      </div>`;
+  }));
+  res.send(layout('QRコード管理', `
+    <div class="card">
+      <p style="margin-bottom:16px;">
+        <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
+      </p>
+      <h2>QRコード一覧（全11か所）</h2>
+      <div class="message message-warning" style="margin-bottom:16px; font-size:0.85rem;">
+        ⚠️ 各QRコードの「印刷」ボタンで個別印刷、「メール」ボタンでメール送付できます。
+      </div>
+      <p style="margin-bottom:16px;">
+        <a href="/admin/qr/print-all" target="_blank" class="btn btn-primary" style="display:inline-block; width:auto;">
+          🖨️ 全ロケーション一括印刷
+        </a>
+      </p>
+      <div class="qr-grid">${qrItems.join('')}</div>
+    </div>
+  `, true));
+});
+
+// ===== QRコード全体印刷ページ =====
+app.get('/admin/qr/print-all', requireAdmin, async (req, res) => {
+  const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1');
+  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
+  const pages = await Promise.all(locs.map(async l => {
+    const url = `${baseUrl}/scan/${l.qr_token}`;
+    const qrDataUrl = await QRCode.toDataURL(url, { width: 300 });
+    return `
+      <div class="print-page">
+        <div class="print-card">
+          <p class="title">出勤登録QRコード</p>
+          <p class="subtitle">${l.name}</p>
+          <img src="${qrDataUrl}" alt="${l.name}" class="qr-img">
+          <div class="instruction">
+            📱 スマートフォンのカメラで<br>
+            このQRコードを読み取って<br>
+            出勤登録を行ってください
+          </div>
+        </div>
+      </div>`;
+  }));
+  res.send(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>QRコード一括印刷</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Hiragino Sans','Meiryo',sans-serif; background:#f0f4f8; }
+    .no-print { text-align:center; padding:24px; background:#4f46e5; color:white; }
+    .no-print h1 { font-size:1.2rem; margin-bottom:12px; }
+    .no-print-btns { display:flex; gap:12px; justify-content:center; }
+    .btn { padding:10px 24px; border-radius:8px; font-size:0.95rem; cursor:pointer; border:none; font-weight:bold; }
+    .btn-print { background:white; color:#4f46e5; }
+    .btn-close { background:rgba(255,255,255,0.2); color:white; }
+    .pages-wrapper { padding:24px; display:flex; flex-direction:column; gap:24px; align-items:center; }
+    .print-page { background:white; width:210mm; min-height:297mm; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 12px rgba(0,0,0,0.1); }
+    .print-card { text-align:center; padding:48px 40px; width:100%; }
+    .title { font-size:1.6rem; font-weight:bold; color:#1e1b4b; margin-bottom:10px; }
+    .subtitle { font-size:1.3rem; font-weight:bold; color:#4f46e5; margin-bottom:32px; padding:10px 24px; background:#e0e7ff; border-radius:8px; display:inline-block; }
+    .qr-img { width:280px; height:280px; margin:0 auto 32px; display:block; }
+    .instruction { font-size:1rem; color:#444; line-height:1.8; background:#f0f4ff; border-radius:10px; padding:16px 24px; display:inline-block; }
+    @media print {
+      .no-print { display:none; }
+      body { background:white; }
+      .pages-wrapper { padding:0; gap:0; }
+      .print-page { width:100%; min-height:100vh; page-break-after:always; box-shadow:none; margin:0; }
+      .print-page:last-child { page-break-after:avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print">
+    <h1>🖨️ QRコード一括印刷（全${locs.length}か所・1ページ1ロケーション）</h1>
+    <div class="no-print-btns">
+      <button class="btn btn-print" onclick="window.print()">🖨️ 印刷する</button>
+      <button class="btn btn-close" onclick="window.close()">✕ 閉じる</button>
+    </div>
+  </div>
+  <div class="pages-wrapper">${pages.join('')}</div>
+</body>
+</html>`);
+});
+
+// ===== QRコード個別印刷ページ =====
+app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
+  const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [req.params.token]);
+  if (!loc) return res.redirect('/admin/qr');
+  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
+  const url = `${baseUrl}/scan/${loc.qr_token}`;
+  const qrDataUrl = await QRCode.toDataURL(url, { width: 300 });
+  res.send(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>${loc.name} QRコード</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Hiragino Sans','Meiryo',sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; background:white; }
+    .print-card { text-align:center; padding:40px; border:3px solid #4f46e5; border-radius:16px; width:340px; }
+    .title { font-size:1.4rem; font-weight:bold; color:#1e1b4b; margin-bottom:8px; }
+    .subtitle { font-size:1.1rem; font-weight:bold; color:#4f46e5; margin-bottom:24px; padding:8px 16px; background:#e0e7ff; border-radius:8px; display:inline-block; }
+    .qr-img { width:260px; height:260px; margin:0 auto 20px; display:block; }
+    .instruction { font-size:0.85rem; color:#444; line-height:1.6; background:#f0f4ff; border-radius:8px; padding:12px; margin-bottom:20px; }
+    .no-print { margin-top:20px; display:flex; gap:10px; justify-content:center; }
+    .btn { padding:10px 20px; border-radius:8px; font-size:0.9rem; cursor:pointer; border:none; font-weight:bold; }
+    .btn-print { background:#4f46e5; color:white; }
+    .btn-close { background:#e5e7eb; color:#374151; }
+    @media print { .no-print { display:none; } }
+  </style>
+</head>
+<body>
+  <div class="print-card">
+    <p class="title">出勤登録QRコード</p>
+    <p class="subtitle">${loc.name}</p>
+    <img src="${qrDataUrl}" alt="${loc.name}" class="qr-img">
+    <div class="instruction">
+      📱 スマートフォンのカメラで<br>
+      このQRコードを読み取って<br>
+      出勤登録を行ってください
+    </div>
+    <div class="no-print">
+      <button class="btn btn-print" onclick="window.print()">🖨️ 印刷する</button>
+      <button class="btn btn-close" onclick="window.close()">✕ 閉じる</button>
+    </div>
+  </div>
+</body>
+</html>`);
+});
+
 // ===== 管理者：ユーザー管理 =====
-app.get('/admin/users', requireAdmin, (req, res) => {
+app.get('/admin/users', requireAdmin, async (req, res) => {
   const result = req.query.result ? decodeURIComponent(req.query.result) : '';
-  const users = dbAll(`SELECT id, attendance_code, role, is_active, created_at FROM users ORDER BY is_active DESC, attendance_code`);
+  const users = await query(`SELECT id, attendance_code, role, is_active, created_at FROM users ORDER BY is_active DESC, attendance_code`);
   const rows = users.map(u => `
     <tr style="${!u.is_active ? 'opacity:0.5; background:#f9fafb;' : ''}">
       <td style="padding:14px 12px;">${u.attendance_code}</td>
@@ -563,7 +697,8 @@ app.get('/admin/users', requireAdmin, (req, res) => {
       <td style="padding:14px 12px;">${u.created_at}</td>
       <td style="padding:14px 12px; white-space:nowrap;">
         <a href="/admin/users/${u.id}/edit" style="color:#4f46e5; font-size:0.85rem; margin-right:10px;">✏️ 編集</a>
-        <a href="/admin/users/${u.id}/toggle" style="color:${u.is_active ? '#f97316' : '#22c55e'}; font-size:0.85rem; margin-right:10px;"
+        <a href="/admin/users/${u.id}/toggle"
+           style="color:${u.is_active ? '#f97316' : '#22c55e'}; font-size:0.85rem; margin-right:10px;"
            onclick="return confirm('${u.is_active ? '無効にしますか？' : '有効にしますか？'}')">
           ${u.is_active ? '🔒 無効化' : '🔓 有効化'}
         </a>
@@ -610,10 +745,11 @@ app.get('/admin/users', requireAdmin, (req, res) => {
   `, true));
 });
 
+// CSVアップロード処理
 app.post('/admin/users/upload', requireAdmin, (req, res) => {
   let body = '';
   req.on('data', chunk => { body += chunk.toString('binary'); });
-  req.on('end', () => {
+  req.on('end', async () => {
     const boundary = req.headers['content-type'].split('boundary=')[1];
     const parts = body.split('--' + boundary);
 
@@ -637,40 +773,38 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
     for (const line of lines) {
       const cols = line.trim().split(',');
       if (cols.length < 2) { errors++; continue; }
-
-      const code = cols[0].trim().replace(/^0+/, '').padStart(4, '0');
+      const code = cols[0].trim();
       const pass = cols[1].trim();
       const role = (cols[2] || 'staff').trim();
-
       if (!code || !pass) { errors++; continue; }
       if (!['staff', 'admin'].includes(role)) { errors++; continue; }
 
-      const exists = dbGet('SELECT id FROM users WHERE attendance_code = ?', [code]);
+      const exists = await queryOne('SELECT id FROM users WHERE attendance_code = $1', [code]);
       if (exists) { skipped++; continue; }
 
       try {
         const hash = bcrypt.hashSync(pass, 10);
-        dbInsert(`INSERT INTO users (attendance_code, login_id, password_hash, role) VALUES (?, ?, ?, ?)`,
-          [code, code, hash, role]);
+        await query(
+          `INSERT INTO users (attendance_code, login_id, password_hash, role) VALUES ($1, $2, $3, $4)`,
+          [code, code, hash, role]
+        );
         success++;
       } catch (e) {
         errors++;
       }
     }
 
-    logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'CSV_UPLOAD',
+    await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'CSV_UPLOAD',
       `成功:${success} スキップ:${skipped} エラー:${errors}`, req.ip);
 
-    const resultMsg = encodeURIComponent(`登録成功:${success}名 / スキップ(重複):${skipped}名 / エラー:${errors}件`);
-    res.redirect(`/admin/users?result=${resultMsg}`);
+    res.redirect(`/admin/users?result=${encodeURIComponent(`登録成功:${success}名 / スキップ(重複):${skipped}名 / エラー:${errors}件`)}`);
   });
 });
 
 // ユーザー編集画面
-app.get('/admin/users/:id/edit', requireAdmin, (req, res) => {
-  const user = dbGet('SELECT * FROM users WHERE id = ?', [req.params.id]);
+app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
+  const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.params.id]);
   if (!user) return res.redirect('/admin/users');
-
   const msg = req.query.result ? `<div class="message message-success">✅ ${decodeURIComponent(req.query.result)}</div>` : '';
 
   res.send(layout('ユーザー編集', `
@@ -684,7 +818,6 @@ app.get('/admin/users/:id/edit', requireAdmin, (req, res) => {
         <span class="label">出勤用ID</span>
         <span class="value">${user.attendance_code}</span>
       </div>
-
       <div style="margin-top:24px;">
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">パスワード変更</h3>
         <form method="POST" action="/admin/users/${user.id}/password" style="margin-bottom:20px;">
@@ -698,7 +831,6 @@ app.get('/admin/users/:id/edit', requireAdmin, (req, res) => {
           </div>
           <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">🔑 パスワード変更</button>
         </form>
-
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">権限変更</h3>
         <form method="POST" action="/admin/users/${user.id}/role">
           <div class="form-group">
@@ -711,357 +843,55 @@ app.get('/admin/users/:id/edit', requireAdmin, (req, res) => {
           <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">👤 権限変更</button>
         </form>
       </div>
-
-      <p style="margin-top:24px;">
-        <a href="/admin/users" class="btn btn-secondary" style="display:inline-block; width:auto;">← 一覧へ戻る</a>
-      </p>
     </div>
   `, true));
 });
 
 // パスワード変更処理
-app.post('/admin/users/:id/password', requireAdmin, (req, res) => {
+app.post('/admin/users/:id/password', requireAdmin, async (req, res) => {
   const { password, password_confirm } = req.body;
   if (password !== password_confirm) {
     return res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('パスワードが一致しません')}`);
   }
   const hash = bcrypt.hashSync(password, 10);
-  dbRun('UPDATE users SET password_hash = ? WHERE id = ?', [hash, req.params.id]);
-  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'PASSWORD_CHANGE', `対象ID:${req.params.id}`, req.ip);
+  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.params.id]);
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'PASSWORD_CHANGE', `対象ID:${req.params.id}`, req.ip);
   res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('パスワードを変更しました')}`);
 });
 
 // 権限変更処理
-app.post('/admin/users/:id/role', requireAdmin, (req, res) => {
+app.post('/admin/users/:id/role', requireAdmin, async (req, res) => {
   const { role } = req.body;
   if (!['staff', 'admin'].includes(role)) return res.redirect('/admin/users');
-  dbRun('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
-  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'ROLE_CHANGE', `対象ID:${req.params.id} 権限:${role}`, req.ip);
+  await query('UPDATE users SET role = $1 WHERE id = $2', [role, req.params.id]);
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'ROLE_CHANGE', `対象ID:${req.params.id} 権限:${role}`, req.ip);
   res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('権限を変更しました')}`);
 });
 
 // 有効/無効切り替え
-app.get('/admin/users/:id/toggle', requireAdmin, (req, res) => {
-  const user = dbGet('SELECT * FROM users WHERE id = ?', [req.params.id]);
+app.get('/admin/users/:id/toggle', requireAdmin, async (req, res) => {
+  const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.params.id]);
   if (!user) return res.redirect('/admin/users');
   const newStatus = user.is_active ? 0 : 1;
-  dbRun('UPDATE users SET is_active = ? WHERE id = ?', [newStatus, req.params.id]);
-  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_TOGGLE',
+  await query('UPDATE users SET is_active = $1 WHERE id = $2', [newStatus, req.params.id]);
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_TOGGLE',
     `対象ID:${req.params.id} 状態:${newStatus ? '有効' : '無効'}`, req.ip);
   res.redirect('/admin/users');
 });
 
 // ユーザー削除
-app.get('/admin/users/:id/delete', requireAdmin, (req, res) => {
-  const user = dbGet('SELECT * FROM users WHERE id = ?', [req.params.id]);
+app.get('/admin/users/:id/delete', requireAdmin, async (req, res) => {
+  const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.params.id]);
   if (!user) return res.redirect('/admin/users');
-  dbRun('DELETE FROM users WHERE id = ?', [req.params.id]);
-  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_DELETE',
+  await query('DELETE FROM users WHERE id = $1', [req.params.id]);
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_DELETE',
     `出勤用ID:${user.attendance_code}を削除`, req.ip);
   res.redirect('/admin/users');
 });
 
-// ===== QRコード管理 =====
-app.get('/admin/qr', requireAdmin, async (req, res) => {
-  const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
-  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
-  const qrItems = await Promise.all(locs.map(async l => {
-    const url = `${baseUrl}/scan/${l.qr_token}`;
-    const qrDataUrl = await QRCode.toDataURL(url, { width: 200 });
-    const mailBody = encodeURIComponent(`出勤登録用QRコードをお送りします。\n\n設置場所：${l.name}\n\nQRコードURL：${url}\n\nスマートフォンのカメラでQRコードを読み取るか、上記URLにアクセスして出勤登録を行ってください。`);
-    const mailSubject = encodeURIComponent(`【出勤管理】${l.name} QRコードのご案内`);
-    return `
-      <div class="qr-item">
-        <p style="font-weight:bold; font-size:1rem; color:#333; margin-bottom:8px;">${l.name}</p>
-        <img src="${qrDataUrl}" alt="${l.name}" style="width:180px; display:block; margin:0 auto;">
-        <small style="color:#888; font-size:0.7rem; word-break:break-all; display:block; margin:8px 0;">${url}</small>
-        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
-          <a href="/admin/qr/print/${l.qr_token}" target="_blank"
-             style="background:#4f46e5; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; text-decoration:none;">
-            🖨️ 印刷
-          </a>
-          <a href="mailto:?subject=${mailSubject}&body=${mailBody}"
-             style="background:#22c55e; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; text-decoration:none;">
-            📧 メール
-          </a>
-        </div>
-      </div>`;
-  }));
-  res.send(layout('QRコード管理', `
-    <div class="card">
-      <p style="margin-bottom:16px;">
-        <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
-      </p>
-      <h2>QRコード一覧（全11か所）</h2>
-      <div class="message message-warning" style="margin-bottom:16px; font-size:0.85rem;">
-        ⚠️ 各QRコードの「印刷」ボタンで個別印刷、「メール」ボタンでメール送付できます。
-      </div>
-      <p style="margin-bottom:16px;">
-        <a href="/admin/qr/print-all" target="_blank" class="btn btn-primary" style="display:inline-block; width:auto;">
-          🖨️ 全ロケーション一括印刷
-        </a>
-      </p>
-      <div class="qr-grid">${qrItems.join('')}</div>
-    </div>
-  `, true));
-});
-
-// ===== QRコード全体印刷ページ =====
-app.get('/admin/qr/print-all', requireAdmin, async (req, res) => {
-  const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
-  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
-
-  const pages = await Promise.all(locs.map(async l => {
-    const url = `${baseUrl}/scan/${l.qr_token}`;
-    const qrDataUrl = await QRCode.toDataURL(url, { width: 300 });
-    return `
-      <div class="print-page">
-        <div class="print-card">
-          <p class="title">出勤登録QRコード</p>
-          <p class="subtitle">${l.name}</p>
-          <img src="${qrDataUrl}" alt="${l.name}" class="qr-img">
-          <div class="instruction">
-            📱 スマートフォンのカメラで<br>
-            このQRコードを読み取って<br>
-            出勤登録を行ってください
-          </div>
-        </div>
-      </div>`;
-  }));
-
-  res.send(`<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <title>QRコード一括印刷</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
-      background: #f0f4f8;
-    }
-
-    /* 画面表示用 */
-    .no-print {
-      text-align: center;
-      padding: 24px;
-      background: #4f46e5;
-      color: white;
-    }
-    .no-print h1 {
-      font-size: 1.2rem;
-      margin-bottom: 12px;
-    }
-    .no-print-btns {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-    }
-    .btn {
-      padding: 10px 24px;
-      border-radius: 8px;
-      font-size: 0.95rem;
-      cursor: pointer;
-      border: none;
-      font-weight: bold;
-    }
-    .btn-print { background: white; color: #4f46e5; }
-    .btn-close { background: rgba(255,255,255,0.2); color: white; }
-
-    .pages-wrapper {
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
-      align-items: center;
-    }
-
-    .print-page {
-      background: white;
-      width: 210mm;
-      min-height: 297mm;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
-    }
-
-    .print-card {
-      text-align: center;
-      padding: 48px 40px;
-      width: 100%;
-    }
-
-    .title {
-      font-size: 1.6rem;
-      font-weight: bold;
-      color: #1e1b4b;
-      margin-bottom: 10px;
-    }
-
-    .subtitle {
-      font-size: 1.3rem;
-      font-weight: bold;
-      color: #4f46e5;
-      margin-bottom: 32px;
-      padding: 10px 24px;
-      background: #e0e7ff;
-      border-radius: 8px;
-      display: inline-block;
-    }
-
-    .qr-img {
-      width: 280px;
-      height: 280px;
-      margin: 0 auto 32px;
-      display: block;
-    }
-
-    .instruction {
-      font-size: 1rem;
-      color: #444;
-      line-height: 1.8;
-      background: #f0f4ff;
-      border-radius: 10px;
-      padding: 16px 24px;
-      display: inline-block;
-    }
-
-    /* 印刷用スタイル */
-    @media print {
-      .no-print { display: none; }
-      body { background: white; }
-      .pages-wrapper { padding: 0; gap: 0; }
-      .print-page {
-        width: 100%;
-        min-height: 100vh;
-        page-break-after: always;
-        box-shadow: none;
-        margin: 0;
-      }
-      .print-page:last-child {
-        page-break-after: avoid;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div class="no-print">
-    <h1>🖨️ QRコード一括印刷（全${locs.length}か所・1ページ1ロケーション）</h1>
-    <div class="no-print-btns">
-      <button class="btn btn-print" onclick="window.print()">🖨️ 印刷する</button>
-      <button class="btn btn-close" onclick="window.close()">✕ 閉じる</button>
-    </div>
-  </div>
-  <div class="pages-wrapper">
-    ${pages.join('')}
-  </div>
-</body>
-</html>`);
-});
-
-// ===== QRコード個別印刷ページ =====
-app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
-  const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [req.params.token]);
-  if (!loc) return res.redirect('/admin/qr');
-
-  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
-  const url = `${baseUrl}/scan/${loc.qr_token}`;
-  const qrDataUrl = await QRCode.toDataURL(url, { width: 300 });
-
-  res.send(`<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <title>${loc.name} QRコード</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      background: white;
-    }
-    .print-card {
-      text-align: center;
-      padding: 40px;
-      border: 3px solid #4f46e5;
-      border-radius: 16px;
-      width: 340px;
-    }
-    .title {
-      font-size: 1.4rem;
-      font-weight: bold;
-      color: #1e1b4b;
-      margin-bottom: 8px;
-    }
-    .subtitle {
-      font-size: 0.9rem;
-      color: #666;
-      margin-bottom: 24px;
-    }
-    .qr-img {
-      width: 260px;
-      height: 260px;
-      margin: 0 auto 20px;
-      display: block;
-    }
-    .instruction {
-      font-size: 0.85rem;
-      color: #444;
-      line-height: 1.6;
-      background: #f0f4ff;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 20px;
-    }
-    .no-print {
-      margin-top: 20px;
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-    }
-    .btn {
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      cursor: pointer;
-      border: none;
-      font-weight: bold;
-    }
-    .btn-print { background: #4f46e5; color: white; }
-    .btn-close { background: #e5e7eb; color: #374151; }
-    @media print {
-      .no-print { display: none; }
-      body { margin: 0; }
-      .print-card { border: 3px solid #4f46e5; }
-    }
-  </style>
-</head>
-<body>
-  <div class="print-card">
-    <p class="title">出勤登録QRコード</p>
-    <p class="subtitle">${loc.name}</p>
-    <img src="${qrDataUrl}" alt="${loc.name}" class="qr-img">
-    <div class="instruction">
-      📱 スマートフォンのカメラで<br>
-      このQRコードを読み取って<br>
-      出勤登録を行ってください
-    </div>
-    <div class="no-print">
-      <button class="btn btn-print" onclick="window.print()">🖨️ 印刷する</button>
-      <button class="btn btn-close" onclick="window.close()">✕ 閉じる</button>
-    </div>
-  </div>
-</body>
-</html>`);
-});
-
 // ===== 操作ログ =====
-app.get('/admin/logs', requireAdmin, (req, res) => {
-  const logs = dbAll('SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 300');
+app.get('/admin/logs', requireAdmin, async (req, res) => {
+  const logs = await query('SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 300');
   const roleLabel = { admin: '管理者', staff: '職員' };
   const actionLabel = {
     LOGIN: 'ログイン',
