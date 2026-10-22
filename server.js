@@ -770,12 +770,25 @@ app.get('/admin/qr', requireAdmin, async (req, res) => {
   const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
   const qrItems = await Promise.all(locs.map(async l => {
     const url = `${baseUrl}/scan/${l.qr_token}`;
-    const qrDataUrl = await QRCode.toDataURL(url, { width: 180 });
-    return `<div class="qr-item">
-      <img src="${qrDataUrl}" alt="${l.name}" style="width:160px;">
-      <p>${l.name}</p>
-      <small style="color:#888; font-size:0.7rem; word-break:break-all;">${url}</small>
-    </div>`;
+    const qrDataUrl = await QRCode.toDataURL(url, { width: 200 });
+    const mailBody = encodeURIComponent(`出勤登録用QRコードをお送りします。\n\n設置場所：${l.name}\n\nQRコードURL：${url}\n\nスマートフォンのカメラでQRコードを読み取るか、上記URLにアクセスして出勤登録を行ってください。`);
+    const mailSubject = encodeURIComponent(`【出勤管理】${l.name} QRコードのご案内`);
+    return `
+      <div class="qr-item">
+        <p style="font-weight:bold; font-size:1rem; color:#333; margin-bottom:8px;">${l.name}</p>
+        <img src="${qrDataUrl}" alt="${l.name}" style="width:180px; display:block; margin:0 auto;">
+        <small style="color:#888; font-size:0.7rem; word-break:break-all; display:block; margin:8px 0;">${url}</small>
+        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
+          <a href="/admin/qr/print/${l.qr_token}" target="_blank"
+             style="background:#4f46e5; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; text-decoration:none;">
+            🖨️ 印刷
+          </a>
+          <a href="mailto:?subject=${mailSubject}&body=${mailBody}"
+             style="background:#22c55e; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; text-decoration:none;">
+            📧 メール
+          </a>
+        </div>
+      </div>`;
   }));
   res.send(layout('QRコード管理', `
     <div class="card">
@@ -784,11 +797,269 @@ app.get('/admin/qr', requireAdmin, async (req, res) => {
       </p>
       <h2>QRコード一覧（全11か所）</h2>
       <div class="message message-warning" style="margin-bottom:16px; font-size:0.85rem;">
-        ⚠️ QRコードは印刷して各場所に掲示してください。
+        ⚠️ 各QRコードの「印刷」ボタンで個別印刷、「メール」ボタンでメール送付できます。
       </div>
+      <p style="margin-bottom:16px;">
+        <a href="/admin/qr/print-all" target="_blank" class="btn btn-primary" style="display:inline-block; width:auto;">
+          🖨️ 全ロケーション一括印刷
+        </a>
+      </p>
       <div class="qr-grid">${qrItems.join('')}</div>
     </div>
   `, true));
+});
+
+// ===== QRコード全体印刷ページ =====
+app.get('/admin/qr/print-all', requireAdmin, async (req, res) => {
+  const locs = dbAll('SELECT * FROM qr_locations WHERE is_active = 1');
+  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
+
+  const pages = await Promise.all(locs.map(async l => {
+    const url = `${baseUrl}/scan/${l.qr_token}`;
+    const qrDataUrl = await QRCode.toDataURL(url, { width: 300 });
+    return `
+      <div class="print-page">
+        <div class="print-card">
+          <p class="title">出勤登録QRコード</p>
+          <p class="subtitle">${l.name}</p>
+          <img src="${qrDataUrl}" alt="${l.name}" class="qr-img">
+          <div class="instruction">
+            📱 スマートフォンのカメラで<br>
+            このQRコードを読み取って<br>
+            出勤登録を行ってください
+          </div>
+        </div>
+      </div>`;
+  }));
+
+  res.send(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>QRコード一括印刷</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
+      background: #f0f4f8;
+    }
+
+    /* 画面表示用 */
+    .no-print {
+      text-align: center;
+      padding: 24px;
+      background: #4f46e5;
+      color: white;
+    }
+    .no-print h1 {
+      font-size: 1.2rem;
+      margin-bottom: 12px;
+    }
+    .no-print-btns {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+    .btn {
+      padding: 10px 24px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      border: none;
+      font-weight: bold;
+    }
+    .btn-print { background: white; color: #4f46e5; }
+    .btn-close { background: rgba(255,255,255,0.2); color: white; }
+
+    .pages-wrapper {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .print-page {
+      background: white;
+      width: 210mm;
+      min-height: 297mm;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+
+    .print-card {
+      text-align: center;
+      padding: 48px 40px;
+      width: 100%;
+    }
+
+    .title {
+      font-size: 1.6rem;
+      font-weight: bold;
+      color: #1e1b4b;
+      margin-bottom: 10px;
+    }
+
+    .subtitle {
+      font-size: 1.3rem;
+      font-weight: bold;
+      color: #4f46e5;
+      margin-bottom: 32px;
+      padding: 10px 24px;
+      background: #e0e7ff;
+      border-radius: 8px;
+      display: inline-block;
+    }
+
+    .qr-img {
+      width: 280px;
+      height: 280px;
+      margin: 0 auto 32px;
+      display: block;
+    }
+
+    .instruction {
+      font-size: 1rem;
+      color: #444;
+      line-height: 1.8;
+      background: #f0f4ff;
+      border-radius: 10px;
+      padding: 16px 24px;
+      display: inline-block;
+    }
+
+    /* 印刷用スタイル */
+    @media print {
+      .no-print { display: none; }
+      body { background: white; }
+      .pages-wrapper { padding: 0; gap: 0; }
+      .print-page {
+        width: 100%;
+        min-height: 100vh;
+        page-break-after: always;
+        box-shadow: none;
+        margin: 0;
+      }
+      .print-page:last-child {
+        page-break-after: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print">
+    <h1>🖨️ QRコード一括印刷（全${locs.length}か所・1ページ1ロケーション）</h1>
+    <div class="no-print-btns">
+      <button class="btn btn-print" onclick="window.print()">🖨️ 印刷する</button>
+      <button class="btn btn-close" onclick="window.close()">✕ 閉じる</button>
+    </div>
+  </div>
+  <div class="pages-wrapper">
+    ${pages.join('')}
+  </div>
+</body>
+</html>`);
+});
+
+// ===== QRコード個別印刷ページ =====
+app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
+  const loc = dbGet('SELECT * FROM qr_locations WHERE qr_token = ? AND is_active = 1', [req.params.token]);
+  if (!loc) return res.redirect('/admin/qr');
+
+  const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
+  const url = `${baseUrl}/scan/${loc.qr_token}`;
+  const qrDataUrl = await QRCode.toDataURL(url, { width: 300 });
+
+  res.send(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>${loc.name} QRコード</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: white;
+    }
+    .print-card {
+      text-align: center;
+      padding: 40px;
+      border: 3px solid #4f46e5;
+      border-radius: 16px;
+      width: 340px;
+    }
+    .title {
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: #1e1b4b;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 24px;
+    }
+    .qr-img {
+      width: 260px;
+      height: 260px;
+      margin: 0 auto 20px;
+      display: block;
+    }
+    .instruction {
+      font-size: 0.85rem;
+      color: #444;
+      line-height: 1.6;
+      background: #f0f4ff;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 20px;
+    }
+    .no-print {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border: none;
+      font-weight: bold;
+    }
+    .btn-print { background: #4f46e5; color: white; }
+    .btn-close { background: #e5e7eb; color: #374151; }
+    @media print {
+      .no-print { display: none; }
+      body { margin: 0; }
+      .print-card { border: 3px solid #4f46e5; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-card">
+    <p class="title">出勤登録QRコード</p>
+    <p class="subtitle">${loc.name}</p>
+    <img src="${qrDataUrl}" alt="${loc.name}" class="qr-img">
+    <div class="instruction">
+      📱 スマートフォンのカメラで<br>
+      このQRコードを読み取って<br>
+      出勤登録を行ってください
+    </div>
+    <div class="no-print">
+      <button class="btn btn-print" onclick="window.print()">🖨️ 印刷する</button>
+      <button class="btn btn-close" onclick="window.close()">✕ 閉じる</button>
+    </div>
+  </div>
+</body>
+</html>`);
 });
 
 // ===== 操作ログ =====
