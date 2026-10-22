@@ -1063,11 +1063,27 @@ app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
 app.get('/admin/logs', requireAdmin, (req, res) => {
   const logs = dbAll('SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 300');
   const roleLabel = { admin: '管理者', staff: '職員' };
+  const actionLabel = {
+    LOGIN: 'ログイン',
+    LOGIN_FAIL: 'ログイン失敗',
+    LOGOUT: 'ログアウト',
+    ATTENDANCE: '出勤登録',
+    CSV_UPLOAD: 'CSVアップロード',
+    USER_TOGGLE: 'ユーザー有効/無効変更',
+    USER_DELETE: 'ユーザー削除',
+    PASSWORD_CHANGE: 'パスワード変更',
+    ROLE_CHANGE: '権限変更',
+    EXCEL_EXPORT: 'Excel出力',
+  };
+  const rows = logs.map(l => `
     <tr>
-      <td>${l.id}</td><td>${l.created_at}</td><td>${l.attendance_code||'-'}</td>
-      <td>${l.role||'-'}</td><td>${l.action}</td>
-      <td style="font-size:0.8rem;">${l.detail||'-'}</td>
-      <td style="font-size:0.8rem;">${l.ip_address||'-'}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">${l.id}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">${l.created_at}</td>
+      <td style="padding:14px 12px;">${l.attendance_code||'-'}</td>
+      <td style="padding:14px 12px;">${roleLabel[l.role] || l.role || '-'}</td>
+      <td style="padding:14px 12px;">${actionLabel[l.action] || l.action}</td>
+      <td style="padding:14px 12px;">${l.detail||'-'}</td>
+      <td style="padding:14px 12px; font-size:0.8rem;">${l.ip_address||'-'}</td>
     </tr>`).join('');
   res.send(layout('操作ログ', `
     <div class="card">
@@ -1077,8 +1093,18 @@ app.get('/admin/logs', requireAdmin, (req, res) => {
       <h2>操作ログ（最新300件）</h2>
       <div class="table-wrapper">
         <table>
-          <thead><tr><th>ID</th><th>日時</th><th>出勤用ID</th><th>権限</th><th>操作</th><th>詳細</th><th>IP</th></tr></thead>
-          <tbody>${rows||'<tr><td colspan="7" style="text-align:center">ログがありません</td></tr>'}</tbody>
+          <thead>
+            <tr>
+              <th style="padding:12px 14px;">ID</th>
+              <th style="padding:12px 14px;">日時</th>
+              <th style="padding:12px 14px;">出勤用ID</th>
+              <th style="padding:12px 14px;">権限</th>
+              <th style="padding:12px 14px;">操作</th>
+              <th style="padding:12px 14px;">詳細</th>
+              <th style="padding:12px 14px;">IP</th>
+            </tr>
+          </thead>
+          <tbody>${rows||'<tr><td colspan="7" style="text-align:center; padding:20px;">ログがありません</td></tr>'}</tbody>
         </table>
       </div>
     </div>
