@@ -554,18 +554,23 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
 // ===== 管理者：ユーザー管理 =====
 app.get('/admin/users', requireAdmin, (req, res) => {
   const result = req.query.result ? decodeURIComponent(req.query.result) : '';
-  const users = dbAll(`SELECT id, attendance_code, role, is_active, created_at FROM users ORDER BY attendance_code`);
+  const users = dbAll(`SELECT id, attendance_code, role, is_active, created_at FROM users ORDER BY is_active DESC, attendance_code`);
   const rows = users.map(u => `
-    <tr>
-      <td>${u.attendance_code}</td>
-      <td>${u.role === 'admin' ? '管理者' : '職員'}</td>
-      <td><span class="badge ${u.is_active ? 'badge-normal' : 'badge-caution'}">${u.is_active ? '有効' : '無効'}</span></td>
-      <td>${u.created_at}</td>
-      <td>
-        <a href="/admin/users/${u.id}/edit" style="color:#4f46e5; font-size:0.85rem; margin-right:8px;">編集</a>
-        <a href="/admin/users/${u.id}/toggle" style="color:${u.is_active ? '#ef4444' : '#22c55e'}; font-size:0.85rem;"
+    <tr style="${!u.is_active ? 'opacity:0.5; background:#f9fafb;' : ''}">
+      <td style="padding:14px 12px;">${u.attendance_code}</td>
+      <td style="padding:14px 12px;">${u.role === 'admin' ? '管理者' : '職員'}</td>
+      <td style="padding:14px 12px;"><span class="badge ${u.is_active ? 'badge-normal' : 'badge-caution'}">${u.is_active ? '有効' : '無効'}</span></td>
+      <td style="padding:14px 12px;">${u.created_at}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">
+        <a href="/admin/users/${u.id}/edit" style="color:#4f46e5; font-size:0.85rem; margin-right:10px;">✏️ 編集</a>
+        <a href="/admin/users/${u.id}/toggle" style="color:${u.is_active ? '#f97316' : '#22c55e'}; font-size:0.85rem; margin-right:10px;"
            onclick="return confirm('${u.is_active ? '無効にしますか？' : '有効にしますか？'}')">
-          ${u.is_active ? '無効化' : '有効化'}
+          ${u.is_active ? '🔒 無効化' : '🔓 有効化'}
+        </a>
+        <a href="/admin/users/${u.id}/delete"
+           style="color:#ef4444; font-size:0.85rem;"
+           onclick="return confirm('本当に削除しますか？この操作は元に戻せません。')">
+          🗑️ 削除
         </a>
       </td>
     </tr>`).join('');
@@ -737,6 +742,16 @@ app.get('/admin/users/:id/toggle', requireAdmin, (req, res) => {
   dbRun('UPDATE users SET is_active = ? WHERE id = ?', [newStatus, req.params.id]);
   logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_TOGGLE',
     `対象ID:${req.params.id} 状態:${newStatus ? '有効' : '無効'}`, req.ip);
+  res.redirect('/admin/users');
+});
+
+// ユーザー削除
+app.get('/admin/users/:id/delete', requireAdmin, (req, res) => {
+  const user = dbGet('SELECT * FROM users WHERE id = ?', [req.params.id]);
+  if (!user) return res.redirect('/admin/users');
+  dbRun('DELETE FROM users WHERE id = ?', [req.params.id]);
+  logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_DELETE',
+    `出勤用ID:${user.attendance_code}を削除`, req.ip);
   res.redirect('/admin/users');
 });
 
