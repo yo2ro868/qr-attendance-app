@@ -435,7 +435,7 @@ app.get('/admin', requireAdmin, (req, res) => {
         <a href="/admin/logs" class="admin-menu-item">
           <div class="icon">📝</div><div class="title">操作ログ</div>
         </a>
-        <a href="/admin/attendance/excel" class="admin-menu-item">
+
           <div class="icon">📊</div><div class="title">Excel出力</div>
         </a>
         <a href="/admin/users" class="admin-menu-item">
