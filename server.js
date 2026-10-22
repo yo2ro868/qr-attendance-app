@@ -1062,7 +1062,7 @@ app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
 // ===== 操作ログ =====
 app.get('/admin/logs', requireAdmin, (req, res) => {
   const logs = dbAll('SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 300');
-  const rows = logs.map(l => `
+  const roleLabel = { admin: '管理者', staff: '職員' };
     <tr>
       <td>${l.id}</td><td>${l.created_at}</td><td>${l.attendance_code||'-'}</td>
       <td>${l.role||'-'}</td><td>${l.action}</td>
