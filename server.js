@@ -475,6 +475,9 @@ app.get('/admin/attendance', requireAdmin, (req, res) => {
 
   res.send(layout('出勤状況一覧', `
     <div class="card">
+      <p style="margin-bottom:16px;">
+        <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
+      </p>
       <h2>出勤状況一覧</h2>
       <form class="filter-form" method="GET">
         <input type="date" name="start" value="${start||''}">
@@ -542,11 +545,11 @@ app.get('/admin/attendance/:id', requireAdmin, (req, res) => {
   ];
   res.send(layout('出勤詳細', `
     <div class="card">
+      <p style="margin-bottom:16px;">
+        <a href="/admin/attendance" class="btn btn-secondary" style="display:inline-block; width:auto;">← 出勤状況一覧へ</a>
+      </p>
       <h2>出勤詳細</h2>
       ${items.map(([l,v]) => `<div class="confirm-item"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}
-      <p style="margin-top:20px;">
-        <a href="/admin/attendance" class="btn btn-secondary" style="display:inline-block; width:auto;">← 一覧へ戻る</a>
-      </p>
     </div>
   `, true));
 });
@@ -577,6 +580,9 @@ app.get('/admin/users', requireAdmin, (req, res) => {
 
   res.send(layout('ユーザー管理', `
     <div class="card">
+      <p style="margin-bottom:16px;">
+        <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
+      </p>
       <h2>CSVで一括登録</h2>
       ${result ? `<div class="message message-success">✅ ${result}</div>` : ''}
       <div class="message message-info" style="font-size:0.85rem;">
@@ -672,6 +678,9 @@ app.get('/admin/users/:id/edit', requireAdmin, (req, res) => {
 
   res.send(layout('ユーザー編集', `
     <div class="card">
+      <p style="margin-bottom:16px;">
+        <a href="/admin/users" class="btn btn-secondary" style="display:inline-block; width:auto;">← ユーザー管理へ</a>
+      </p>
       <h2>ユーザー編集</h2>
       ${msg}
       <div class="confirm-item">
@@ -770,6 +779,9 @@ app.get('/admin/qr', requireAdmin, async (req, res) => {
   }));
   res.send(layout('QRコード管理', `
     <div class="card">
+      <p style="margin-bottom:16px;">
+        <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
+      </p>
       <h2>QRコード一覧（全11か所）</h2>
       <div class="message message-warning" style="margin-bottom:16px; font-size:0.85rem;">
         ⚠️ QRコードは印刷して各場所に掲示してください。
@@ -791,6 +803,9 @@ app.get('/admin/logs', requireAdmin, (req, res) => {
     </tr>`).join('');
   res.send(layout('操作ログ', `
     <div class="card">
+      <p style="margin-bottom:16px;">
+        <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
+      </p>
       <h2>操作ログ（最新300件）</h2>
       <div class="table-wrapper">
         <table>
