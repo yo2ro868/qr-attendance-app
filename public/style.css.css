@@ -44,7 +44,7 @@ header a:hover {
 
 /* ===== メインコンテンツ ===== */
 main {
-  max-width: 600px;
+  max-width: 640px;
   margin: 32px auto;
   padding: 0 16px;
 }
@@ -203,16 +203,6 @@ main {
   color: #9a3412;
 }
 
-.badge-inside {
-  background: #dbeafe;
-  color: #1e40af;
-}
-
-.badge-outside {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
 /* ===== テーブル ===== */
 .table-wrapper {
   overflow-x: auto;
@@ -226,7 +216,7 @@ table {
 
 th {
   background: #f1f5f9;
-  padding: 10px 12px;
+  padding: 12px 14px;
   text-align: left;
   color: #555;
   font-weight: 600;
@@ -234,7 +224,7 @@ th {
 }
 
 td {
-  padding: 10px 12px;
+  padding: 14px;
   border-bottom: 1px solid #f1f5f9;
   vertical-align: middle;
 }
@@ -257,7 +247,7 @@ tr:hover td {
   border-radius: 20px;
   padding: 40px 32px;
   width: 100%;
-  max-width: 380px;
+  max-width: 400px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.2);
 }
 
@@ -279,7 +269,7 @@ tr:hover td {
 .confirm-item {
   display: flex;
   justify-content: space-between;
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid #f0f0f0;
   font-size: 0.95rem;
 }
@@ -296,21 +286,22 @@ tr:hover td {
 /* ===== QRコード表示 ===== */
 .qr-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 16px;
 }
 
 .qr-item {
-  background: white;
+  background: #f8fafc;
   border-radius: 12px;
   padding: 16px;
   text-align: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  border: 1px solid #e2e8f0;
 }
 
 .qr-item p {
-  font-size: 0.85rem;
-  color: #555;
+  font-size: 0.9rem;
+  color: #333;
   margin-top: 8px;
   font-weight: 600;
 }
@@ -333,11 +324,13 @@ tr:hover td {
   display: flex;
   align-items: center;
   gap: 14px;
+  border: 1px solid #e0e7ff;
 }
 
 .admin-menu-item:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+  border-color: #a5b4fc;
 }
 
 .admin-menu-item .icon {
@@ -402,6 +395,8 @@ tr:hover td {
   color: #6366f1;
   line-height: 1.5;
 }
+
+/* ===== レスポンシブ ===== */
 @media (max-width: 480px) {
   main {
     margin: 16px auto;
@@ -409,10 +404,6 @@ tr:hover td {
 
   .card {
     padding: 20px;
-  }
-
-  .admin-menu {
-    grid-template-columns: 1fr;
   }
 
   .qr-grid {
