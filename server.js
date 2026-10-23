@@ -7,6 +7,7 @@ const { Pool } = require('pg');
 const QRCode = require('qrcode');
 const ExcelJS = require('exceljs');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -110,21 +111,20 @@ async function initDB() {
     );
   }
 
-  const initialUsers = [
-    { code: '9001', role: 'admin', pass: 'admin123' },
-    { code: '9002', role: 'admin', pass: 'admin123' },
-    { code: '9003', role: 'admin', pass: 'admin123' },
-    { code: '1234', role: 'staff', pass: 'user123' },
-    { code: '5678', role: 'staff', pass: 'user123' },
-    { code: '0425', role: 'staff', pass: 'user123' },
-  ];
-  for (const u of initialUsers) {
-    const hash = bcrypt.hashSync(u.pass, 10);
+  // ユーザーが1人もいない場合のみ、初期管理者（9001）を作成する
+  const userCount = await queryOne('SELECT COUNT(*)::int AS count FROM users');
+  if (userCount.count === 0) {
+    const initialPass = process.env.INITIAL_ADMIN_PASSWORD || crypto.randomBytes(9).toString('base64url');
+    const hash = bcrypt.hashSync(initialPass, 10);
     await query(
       `INSERT INTO users (attendance_code, login_id, password_hash, role, must_change_password)
-       VALUES ($1, $2, $3, $4, 1) ON CONFLICT (attendance_code) DO NOTHING`,
-      [u.code, u.code, hash, u.role]
+       VALUES ($1, $2, $3, $4, 1)`,
+      ['9001', '9001', hash, 'admin']
     );
+    console.log('初期管理者を作成しました（出勤用ID: 9001）');
+    if (!process.env.INITIAL_ADMIN_PASSWORD) {
+      console.log(`初期パスワード: ${initialPass}（初回ログイン時に変更してください）`);
+    }
   }
   console.log('DB初期化完了');
 }
@@ -133,8 +133,13 @@ async function initDB() {
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+// セッション秘密鍵は環境変数 SESSION_SECRET から読み込む
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.SESSION_SECRET) {
+  console.warn('警告: SESSION_SECRET が未設定です。一時的な鍵を使うため、再起動のたびに全員ログアウトされます。');
+}
 app.use(session({
-  secret: 'qr-attendance-secret-key',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 8 * 60 * 60 * 1000 }
