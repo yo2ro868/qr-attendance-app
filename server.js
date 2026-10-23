@@ -281,7 +281,7 @@ app.get('/', async (req, res) => {
         🔑 ログイン
       </button>
     </form>
-    ${!token ? `
+    ${token ? `
     <div style="margin-top:28px; border-top:1px solid #e0e7ff; padding-top:20px;">
       <p style="text-align:center; color:#666; font-size:0.85rem; margin-bottom:12px;">
         ── まだQRコードを読み取っていない場合 ──
