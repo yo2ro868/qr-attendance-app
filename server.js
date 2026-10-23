@@ -964,6 +964,11 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
       <div class="confirm-item"><span class="label">出勤用ID</span><span class="value">${user.attendance_code}</span></div>
       <div style="margin-top:24px;">
         
+        <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">パスワード初期化</h3>
+        <div class="message message-info" style="font-size:0.85rem;">初期化すると出勤用IDと同じパスワードにリセットされます。<br>次回ログイン時に本人がパスワードを変更する必要があります。</div>
+        <form method="POST" action="/admin/users/${user.id}/reset-password" style="margin-bottom:20px;">
+          <button type="submit" class="btn btn-danger" style="width:auto; padding:10px 24px;" onclick="return confirm('パスワードを初期化しますか？')">🔄 パスワードを初期化する</button>
+        </form>
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">権限変更</h3>
         <form method="POST" action="/admin/users/${user.id}/role">
           <div class="form-group">
