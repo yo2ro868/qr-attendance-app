@@ -420,7 +420,7 @@ app.post('/change-password', requireLogin, async (req, res) => {
     return res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
   }
 
-  res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
+  res.redirect(`/change-password?result=${encodeURIComponent('パスワードを変更しました')}`);
 });
 
 // ===== QRコードリーダー画面 =====
@@ -995,7 +995,7 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
   `, { role: 'admin' }));
 });
 
-// パスワード初期化（管理者による）
+// パスワード変更（管理者による）
 app.post('/admin/users/:id/password', requireAdmin, async (req, res) => {
   const { password, password_confirm, must_change } = req.body;
   if (password !== password_confirm) {
