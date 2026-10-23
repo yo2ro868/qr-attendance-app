@@ -289,6 +289,96 @@ app.get('/', async (req, res) => {
   `);
 });
 
+// ===== ログイン処理 =====
+app.post('/login', async (req, res) => {
+  const { login_id, password, token } = req.body;
+  const user = await queryOne('SELECT * FROM users WHERE login_id = $1 AND is_active = 1', [login_id]);
+
+  if (!user) {
+    await logOperation(null, login_id, null, 'LOGIN_FAIL', 'IDが存在しない', req.ip);
+    const tokenParam = token ? `&token=${token}` : '';
+    return res.redirect(`/?error=1${tokenParam}`);
+  }
+
+  // ロックチェック
+  const lockStatus = await checkAndLock(user);
+  if (lockStatus.locked) {
+    await logOperation(user.id, user.attendance_code, user.role, 'LOGIN_FAIL', 'アカウントロック中', req.ip);
+    const tokenParam = token ? `&token=${token}` : '';
+    return res.redirect(`/?error=locked&min=${lockStatus.remaining}${tokenParam}`);
+  }
+
+  // パスワードチェック
+  if (!bcrypt.compareSync(password, user.password_hash)) {
+    const result = await recordFailedAttempt(user);
+    await logOperation(user.id, user.attendance_code, user.role, 'LOGIN_FAIL', `パスワード誤り(${user.failed_attempts + 1}回目)`, req.ip);
+    const tokenParam = token ? `&token=${token}` : '';
+    if (result.locked) {
+      return res.redirect(`/?error=locked&min=${result.remaining}${tokenParam}`);
+    }
+    return res.redirect(`/?error=attempts&rem=${result.remaining}${tokenParam}`);
+  }
+
+  // ログイン成功
+  await resetFailedAttempts(user.id);
+  req.session.userId = user.id;
+  req.session.role = user.role;
+  req.session.attendanceCode = user.attendance_code;
+  req.session.qrToken = token || null;
+  req.session.mustChangePassword = user.must_change_password === 1;
+  await logOperation(user.id, user.attendance_code, user.role, 'LOGIN', 'ログイン成功', req.ip);
+
+  // パスワード変更が必要な場合
+  if (user.must_change_password === 1) {
+    return res.redirect('/change-password');
+  }
+
+  if (token) return res.redirect(`/confirm?token=${token}`);
+  res.redirect(user.role === 'admin' ? '/admin' : '/home');
+});
+
+// ===== ログアウト =====
+app.get('/logout', requireLogin, async (req, res) => {
+  await logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'LOGOUT', null, req.ip);
+  req.session.destroy();
+  res.redirect('/');
+});
+
+// ===== パスワード変更画面（職員・管理者共通） =====
+app.get('/change-password', requireLogin, (req, res) => {
+  const isForced = req.session.mustChangePassword;
+  const msg = req.query.result ? `<div class="message message-success">✅ ${decodeURIComponent(req.query.result)}</div>` : '';
+  const err = req.query.error ? `<div class="message message-error">❌ ${decodeURIComponent(req.query.error)}</div>` : '';
+
+  res.send(layout('パスワード変更', `
+    <div class="card">
+      <h2>🔑 パスワード変更</h2>
+      ${isForced ? '<div class="message message-warning">⚠️ 初回ログインのため、パスワードを変更してください。</div>' : ''}
+      ${msg}${err}
+      <form method="POST" action="/change-password">
+        <div class="form-group">
+          <label>現在のパスワード</label>
+          <input type="password" name="current_password" required placeholder="現在のパスワード">
+        </div>
+        <div class="form-group">
+          <label>新しいパスワード（6文字以上）</label>
+          <input type="password" name="new_password" required minlength="6" placeholder="新しいパスワード">
+        </div>
+        <div class="form-group">
+          <label>新しいパスワード（確認）</label>
+          <input type="password" name="confirm_password" required minlength="6" placeholder="もう一度入力">
+        </div>
+        <button type="submit" class="btn btn-primary" style="margin-top:8px;">
+          🔑 パスワードを変更する
+        </button>
+      </form>
+      ${!isForced ? `<p style="margin-top:16px;">
+        <a href="${req.session.role === 'admin' ? '/admin' : '/home'}" class="btn btn-secondary" style="display:inline-block; width:auto;">← 戻る</a>
+      </p>` : ''}
+    </div>
+  `, { role: req.session.role }));
+});
+
 app.post('/change-password', requireLogin, async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
 
