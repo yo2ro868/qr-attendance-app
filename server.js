@@ -963,22 +963,7 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
       ${msg}
       <div class="confirm-item"><span class="label">出勤用ID</span><span class="value">${user.attendance_code}</span></div>
       <div style="margin-top:24px;">
-        <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">パスワード変更</h3>
-        <form method="POST" action="/admin/users/${user.id}/reset-password" style="margin-bottom:20px;">
-          <div class="form-group">
-            <label>新しいパスワード（6文字以上）</label>
-            <input type="password" name="password" required minlength="6" placeholder="6文字以上">
-          </div>
-          <div class="form-group">
-            <label>確認用パスワード</label>
-            <input type="password" name="password_confirm" required minlength="6" placeholder="もう一度入力">
-          </div>
-          <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:0.9rem;">
-            <input type="checkbox" name="must_change" checked>
-            次回ログイン時にパスワード変更を強制する
-          </label>
-          <button type="submit" class="btn btn-danger" style="width:auto; padding:10px 24px;" onclick="return confirm('パスワードを初期化しますか？')">🔄 パスワードを初期化する</button>
-        </form>
+        
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">権限変更</h3>
         <form method="POST" action="/admin/users/${user.id}/role">
           <div class="form-group">
