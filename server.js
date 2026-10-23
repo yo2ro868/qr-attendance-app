@@ -420,7 +420,7 @@ app.post('/change-password', requireLogin, async (req, res) => {
     return res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
   }
 
-  res.redirect(`/change-password?result=${encodeURIComponent('パスワードを変更しました')}`);
+  res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
 });
 
 // ===== QRコードリーダー画面 =====
