@@ -282,7 +282,10 @@ app.get('/', async (req, res) => {
       </button>
     </form>
     
-
+  </div>
+</div>
+</body>
+</html>
   `);
 });
 
