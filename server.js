@@ -1,4 +1,4 @@
-// server.js — QRコード式出勤管理アプリ（PostgreSQL版）
+// server.js — QRコード式出勤管理アプリ（セキュリティ強化版）
 
 const express = require('express');
 const session = require('express-session');
@@ -43,7 +43,6 @@ async function initDB() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -52,9 +51,16 @@ async function initDB() {
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL,
       is_active INTEGER DEFAULT 1,
+      failed_attempts INTEGER DEFAULT 0,
+      locked_until TEXT DEFAULT NULL,
+      must_change_password INTEGER DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  // 既存テーブルへのカラム追加（存在しない場合のみ）
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TEXT DEFAULT NULL`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 0`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS attendance_records (
@@ -70,7 +76,6 @@ async function initDB() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
   await query(`
     CREATE TABLE IF NOT EXISTS operation_logs (
       id SERIAL PRIMARY KEY,
@@ -87,16 +92,16 @@ async function initDB() {
   // 初期データ投入
   const locations = [
     { name: '基本法制監理部', token: 'loc-001' },
-    { name: '第1部',         token: 'loc-002' },
-    { name: '第2部',         token: 'loc-003' },
-    { name: '第3部',         token: 'loc-004' },
-    { name: '第4部',         token: 'loc-005' },
-    { name: '第5部',         token: 'loc-006' },
-    { name: '法制主幹',      token: 'loc-007' },
+    { name: '第1部',           token: 'loc-002' },
+    { name: '第2部',           token: 'loc-003' },
+    { name: '第3部',           token: 'loc-004' },
+    { name: '第4部',           token: 'loc-005' },
+    { name: '第5部',           token: 'loc-006' },
+    { name: '法制主幹',        token: 'loc-007' },
     { name: '総務課人事総務係', token: 'loc-008' },
     { name: '総務課会計情報係', token: 'loc-009' },
-    { name: '総務課図書係',  token: 'loc-010' },
-    { name: '次室',          token: 'loc-011' },
+    { name: '総務課図書係',    token: 'loc-010' },
+    { name: '次室',            token: 'loc-011' },
   ];
   for (const l of locations) {
     await query(
@@ -116,11 +121,11 @@ async function initDB() {
   for (const u of initialUsers) {
     const hash = bcrypt.hashSync(u.pass, 10);
     await query(
-      `INSERT INTO users (attendance_code, login_id, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (attendance_code) DO NOTHING`,
+      `INSERT INTO users (attendance_code, login_id, password_hash, role, must_change_password)
+       VALUES ($1, $2, $3, $4, 1) ON CONFLICT (attendance_code) DO NOTHING`,
       [u.code, u.code, hash, u.role]
     );
   }
-
   console.log('DB初期化完了');
 }
 
@@ -145,6 +150,14 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// パスワード変更が必要な場合はリダイレクト
+function requirePasswordChanged(req, res, next) {
+  if (req.session.mustChangePassword && req.path !== '/change-password' && req.path !== '/logout') {
+    return res.redirect('/change-password');
+  }
+  next();
+}
+
 async function logOperation(userId, code, role, action, detail, ip) {
   await query(
     `INSERT INTO operation_logs (user_id, attendance_code, role, action, detail, ip_address) VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -153,7 +166,10 @@ async function logOperation(userId, code, role, action, detail, ip) {
 }
 
 function layout(title, body, user) {
-  const nav = user ? `<header><h1>出勤管理システム</h1><a href="/logout">ログアウト</a></header>` : '';
+  const nav = user ? `<header><h1>出勤管理システム</h1><div style="display:flex;gap:12px;align-items:center;">
+    ${user.role === 'staff' ? `<a href="/change-password" style="color:white;text-decoration:none;font-size:0.8rem;background:rgba(255,255,255,0.2);padding:4px 10px;border-radius:6px;">🔑 PW変更</a>` : ''}
+    <a href="/logout">ログアウト</a>
+  </div></header>` : '';
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -164,6 +180,42 @@ function layout(title, body, user) {
 </head>
 <body>${nav}<main>${body}</main></body>
 </html>`;
+}
+
+// ===== ログイン失敗回数チェック =====
+const MAX_ATTEMPTS = 5;
+const LOCK_MINUTES = 30;
+
+async function checkAndLock(user) {
+  // ロック中かチェック
+  if (user.locked_until) {
+    const lockedUntil = new Date(user.locked_until);
+    if (new Date() < lockedUntil) {
+      const remaining = Math.ceil((lockedUntil - new Date()) / 60000);
+      return { locked: true, remaining };
+    } else {
+      // ロック解除
+      await query('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1', [user.id]);
+    }
+  }
+  return { locked: false };
+}
+
+async function recordFailedAttempt(user) {
+  const newAttempts = (user.failed_attempts || 0) + 1;
+  if (newAttempts >= MAX_ATTEMPTS) {
+    const lockedUntil = new Date(Date.now() + LOCK_MINUTES * 60 * 1000).toISOString();
+    await query('UPDATE users SET failed_attempts = $1, locked_until = $2 WHERE id = $3',
+      [newAttempts, lockedUntil, user.id]);
+    return { locked: true, remaining: LOCK_MINUTES };
+  } else {
+    await query('UPDATE users SET failed_attempts = $1 WHERE id = $2', [newAttempts, user.id]);
+    return { locked: false, remaining: MAX_ATTEMPTS - newAttempts };
+  }
+}
+
+async function resetFailedAttempts(userId) {
+  await query('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1', [userId]);
 }
 
 // ===== QRコード読み取り =====
@@ -179,7 +231,18 @@ app.get('/', async (req, res) => {
   if (req.session.userId) return res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
 
   const token = req.query.token || '';
-  const error = req.query.error ? '<div class="message message-error">IDまたはパスワードが正しくありません</div>' : '';
+  const errorCode = req.query.error || '';
+
+  let errorMsg = '';
+  if (errorCode === '1') errorMsg = '<div class="message message-error">IDまたはパスワードが正しくありません</div>';
+  if (errorCode === 'locked') {
+    const min = req.query.min || LOCK_MINUTES;
+    errorMsg = `<div class="message message-error">⚠️ ログイン失敗が続いたため、アカウントをロックしました。${min}分後に再度お試しください。</div>`;
+  }
+  if (errorCode === 'attempts') {
+    const rem = req.query.rem || '';
+    errorMsg = `<div class="message message-warning">⚠️ パスワードが違います。あと${rem}回失敗するとアカウントがロックされます。</div>`;
+  }
 
   let locationInfo = '';
   if (token) {
@@ -202,7 +265,7 @@ app.get('/', async (req, res) => {
   <div class="login-card">
     <h2>出勤管理システム</h2>
     <p class="subtitle">出勤用IDとパスワードでログイン</p>
-    ${error}
+    ${errorMsg}
     ${locationInfo}
     <form method="POST" action="/login">
       <input type="hidden" name="token" value="${token}">
@@ -245,17 +308,44 @@ app.post('/login', async (req, res) => {
   const { login_id, password, token } = req.body;
   const user = await queryOne('SELECT * FROM users WHERE login_id = $1 AND is_active = 1', [login_id]);
 
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    await logOperation(null, login_id, null, 'LOGIN_FAIL', 'ログイン失敗', req.ip);
+  if (!user) {
+    await logOperation(null, login_id, null, 'LOGIN_FAIL', 'IDが存在しない', req.ip);
     const tokenParam = token ? `&token=${token}` : '';
     return res.redirect(`/?error=1${tokenParam}`);
   }
 
+  // ロックチェック
+  const lockStatus = await checkAndLock(user);
+  if (lockStatus.locked) {
+    await logOperation(user.id, user.attendance_code, user.role, 'LOGIN_FAIL', 'アカウントロック中', req.ip);
+    const tokenParam = token ? `&token=${token}` : '';
+    return res.redirect(`/?error=locked&min=${lockStatus.remaining}${tokenParam}`);
+  }
+
+  // パスワードチェック
+  if (!bcrypt.compareSync(password, user.password_hash)) {
+    const result = await recordFailedAttempt(user);
+    await logOperation(user.id, user.attendance_code, user.role, 'LOGIN_FAIL', `パスワード誤り(${user.failed_attempts + 1}回目)`, req.ip);
+    const tokenParam = token ? `&token=${token}` : '';
+    if (result.locked) {
+      return res.redirect(`/?error=locked&min=${result.remaining}${tokenParam}`);
+    }
+    return res.redirect(`/?error=attempts&rem=${result.remaining}${tokenParam}`);
+  }
+
+  // ログイン成功
+  await resetFailedAttempts(user.id);
   req.session.userId = user.id;
   req.session.role = user.role;
   req.session.attendanceCode = user.attendance_code;
   req.session.qrToken = token || null;
+  req.session.mustChangePassword = user.must_change_password === 1;
   await logOperation(user.id, user.attendance_code, user.role, 'LOGIN', 'ログイン成功', req.ip);
+
+  // パスワード変更が必要な場合
+  if (user.must_change_password === 1) {
+    return res.redirect('/change-password');
+  }
 
   if (token) return res.redirect(`/confirm?token=${token}`);
   res.redirect(user.role === 'admin' ? '/admin' : '/home');
@@ -266,6 +356,71 @@ app.get('/logout', requireLogin, async (req, res) => {
   await logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'LOGOUT', null, req.ip);
   req.session.destroy();
   res.redirect('/');
+});
+
+// ===== パスワード変更画面（職員・管理者共通） =====
+app.get('/change-password', requireLogin, (req, res) => {
+  const isForced = req.session.mustChangePassword;
+  const msg = req.query.result ? `<div class="message message-success">✅ ${decodeURIComponent(req.query.result)}</div>` : '';
+  const err = req.query.error ? `<div class="message message-error">❌ ${decodeURIComponent(req.query.error)}</div>` : '';
+
+  res.send(layout('パスワード変更', `
+    <div class="card">
+      <h2>🔑 パスワード変更</h2>
+      ${isForced ? '<div class="message message-warning">⚠️ 初回ログインのため、パスワードを変更してください。</div>' : ''}
+      ${msg}${err}
+      <form method="POST" action="/change-password">
+        <div class="form-group">
+          <label>現在のパスワード</label>
+          <input type="password" name="current_password" required placeholder="現在のパスワード">
+        </div>
+        <div class="form-group">
+          <label>新しいパスワード（6文字以上）</label>
+          <input type="password" name="new_password" required minlength="6" placeholder="新しいパスワード">
+        </div>
+        <div class="form-group">
+          <label>新しいパスワード（確認）</label>
+          <input type="password" name="confirm_password" required minlength="6" placeholder="もう一度入力">
+        </div>
+        <button type="submit" class="btn btn-primary" style="margin-top:8px;">
+          🔑 パスワードを変更する
+        </button>
+      </form>
+      ${!isForced ? `<p style="margin-top:16px;">
+        <a href="${req.session.role === 'admin' ? '/admin' : '/home'}" class="btn btn-secondary" style="display:inline-block; width:auto;">← 戻る</a>
+      </p>` : ''}
+    </div>
+  `, { role: req.session.role }));
+});
+
+app.post('/change-password', requireLogin, async (req, res) => {
+  const { current_password, new_password, confirm_password } = req.body;
+
+  const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.session.userId]);
+
+  if (!bcrypt.compareSync(current_password, user.password_hash)) {
+    return res.redirect(`/change-password?error=${encodeURIComponent('現在のパスワードが正しくありません')}`);
+  }
+  if (new_password !== confirm_password) {
+    return res.redirect(`/change-password?error=${encodeURIComponent('新しいパスワードが一致しません')}`);
+  }
+  if (new_password.length < 6) {
+    return res.redirect(`/change-password?error=${encodeURIComponent('パスワードは6文字以上で設定してください')}`);
+  }
+
+  const hash = bcrypt.hashSync(new_password, 10);
+  await query('UPDATE users SET password_hash = $1, must_change_password = 0 WHERE id = $2', [hash, req.session.userId]);
+  req.session.mustChangePassword = false;
+  await logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'PASSWORD_CHANGE', '本人によるパスワード変更', req.ip);
+
+  const isForced = user.must_change_password === 1;
+  if (isForced) {
+    const token = req.session.qrToken;
+    if (token) return res.redirect(`/confirm?token=${token}`);
+    return res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
+  }
+
+  res.redirect(`/change-password?result=${encodeURIComponent('パスワードを変更しました')}`);
 });
 
 // ===== QRコードリーダー画面 =====
@@ -296,11 +451,11 @@ app.get('/qr-reader', (req, res) => {
 });
 
 // ===== 出勤登録確認画面 =====
-app.get('/confirm', requireLogin, async (req, res) => {
+app.get('/confirm', requireLogin, requirePasswordChanged, async (req, res) => {
   if (req.session.role === 'admin') return res.redirect('/admin');
   const token = req.query.token || req.session.qrToken;
   const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [token]);
-  if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', true));
+  if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', { role: req.session.role }));
 
   res.send(layout('出勤登録確認', `
     <div class="card">
@@ -320,11 +475,11 @@ app.get('/confirm', requireLogin, async (req, res) => {
         </button>
       </form>
     </div>
-  `, true));
+  `, { role: req.session.role }));
 });
 
 // ===== 職員ホーム =====
-app.get('/home', requireLogin, (req, res) => {
+app.get('/home', requireLogin, requirePasswordChanged, (req, res) => {
   if (req.session.role === 'admin') return res.redirect('/admin');
   res.send(layout('職員ホーム', `
     <div class="card">
@@ -348,11 +503,11 @@ app.get('/home', requireLogin, (req, res) => {
         });
       </script>
     </div>
-  `, true));
+  `, { role: req.session.role }));
 });
 
 // ===== 出勤登録API =====
-app.post('/api/attendance', requireLogin, async (req, res) => {
+app.post('/api/attendance', requireLogin, requirePasswordChanged, async (req, res) => {
   const { qr_token } = req.body;
   const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [qr_token]);
   if (!loc) return res.redirect('/home');
@@ -395,11 +550,11 @@ app.get('/attendance-complete', requireLogin, async (req, res) => {
         <a href="/logout" class="btn btn-secondary" style="display:inline-block;">ログアウト</a>
       </p>
     </div>
-  `, true));
+  `, { role: req.session.role }));
 });
 
 // ===== 管理者ホーム =====
-app.get('/admin', requireAdmin, (req, res) => {
+app.get('/admin', requireAdmin, requirePasswordChanged, (req, res) => {
   res.send(layout('管理者ホーム', `
     <div class="card">
       <h2>管理者メニュー</h2>
@@ -418,7 +573,7 @@ app.get('/admin', requireAdmin, (req, res) => {
         </a>
       </div>
     </div>
-  `, true));
+  `, { role: 'admin' }));
 });
 
 // ===== 管理者：出勤状況一覧 =====
@@ -474,7 +629,7 @@ app.get('/admin/attendance', requireAdmin, async (req, res) => {
         <a href="/admin/attendance/excel" class="btn btn-primary" style="display:inline-block; width:auto;">📊 Excel出力</a>
       </p>
     </div>
-  `, true));
+  `, { role: 'admin' }));
 });
 
 // ===== Excel出力 =====
@@ -527,7 +682,7 @@ app.get('/admin/attendance/:id', requireAdmin, async (req, res) => {
       <h2>出勤詳細</h2>
       ${items.map(([l,v]) => `<div class="confirm-item"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}
     </div>
-  `, true));
+  `, { role: 'admin' }));
 });
 
 // ===== QRコード管理 =====
@@ -572,10 +727,10 @@ app.get('/admin/qr', requireAdmin, async (req, res) => {
       </p>
       <div class="qr-grid">${qrItems.join('')}</div>
     </div>
-  `, true));
+  `, { role: 'admin' }));
 });
 
-// ===== QRコード全体印刷ページ =====
+// ===== QRコード全体印刷 =====
 app.get('/admin/qr/print-all', requireAdmin, async (req, res) => {
   const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1');
   const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
@@ -602,33 +757,33 @@ app.get('/admin/qr/print-all', requireAdmin, async (req, res) => {
   <meta charset="UTF-8">
   <title>QRコード一括印刷</title>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Hiragino Sans','Meiryo',sans-serif; background:#f0f4f8; }
-    .no-print { text-align:center; padding:24px; background:#4f46e5; color:white; }
-    .no-print h1 { font-size:1.2rem; margin-bottom:12px; }
-    .no-print-btns { display:flex; gap:12px; justify-content:center; }
-    .btn { padding:10px 24px; border-radius:8px; font-size:0.95rem; cursor:pointer; border:none; font-weight:bold; }
-    .btn-print { background:white; color:#4f46e5; }
-    .btn-close { background:rgba(255,255,255,0.2); color:white; }
-    .pages-wrapper { padding:24px; display:flex; flex-direction:column; gap:24px; align-items:center; }
-    .print-page { background:white; width:210mm; min-height:297mm; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 12px rgba(0,0,0,0.1); }
-    .print-card { text-align:center; padding:48px 40px; width:100%; }
-    .title { font-size:1.6rem; font-weight:bold; color:#1e1b4b; margin-bottom:10px; }
-    .subtitle { font-size:1.3rem; font-weight:bold; color:#4f46e5; margin-bottom:32px; padding:10px 24px; background:#e0e7ff; border-radius:8px; display:inline-block; }
-    .qr-img { width:280px; height:280px; margin:0 auto 32px; display:block; }
-    .instruction { font-size:1rem; color:#444; line-height:1.8; background:#f0f4ff; border-radius:10px; padding:16px 24px; display:inline-block; }
-    @media print {
-      .no-print { display:none; }
-      body { background:white; }
-      .pages-wrapper { padding:0; gap:0; }
-      .print-page { width:100%; min-height:100vh; page-break-after:always; box-shadow:none; margin:0; }
-      .print-page:last-child { page-break-after:avoid; }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f0f4f8}
+    .no-print{text-align:center;padding:24px;background:#4f46e5;color:white}
+    .no-print h1{font-size:1.2rem;margin-bottom:12px}
+    .no-print-btns{display:flex;gap:12px;justify-content:center}
+    .btn{padding:10px 24px;border-radius:8px;font-size:0.95rem;cursor:pointer;border:none;font-weight:bold}
+    .btn-print{background:white;color:#4f46e5}
+    .btn-close{background:rgba(255,255,255,0.2);color:white}
+    .pages-wrapper{padding:24px;display:flex;flex-direction:column;gap:24px;align-items:center}
+    .print-page{background:white;width:210mm;min-height:297mm;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 12px rgba(0,0,0,0.1)}
+    .print-card{text-align:center;padding:48px 40px;width:100%}
+    .title{font-size:1.6rem;font-weight:bold;color:#1e1b4b;margin-bottom:10px}
+    .subtitle{font-size:1.3rem;font-weight:bold;color:#4f46e5;margin-bottom:32px;padding:10px 24px;background:#e0e7ff;border-radius:8px;display:inline-block}
+    .qr-img{width:280px;height:280px;margin:0 auto 32px;display:block}
+    .instruction{font-size:1rem;color:#444;line-height:1.8;background:#f0f4ff;border-radius:10px;padding:16px 24px;display:inline-block}
+    @media print{
+      .no-print{display:none}
+      body{background:white}
+      .pages-wrapper{padding:0;gap:0}
+      .print-page{width:100%;min-height:100vh;page-break-after:always;box-shadow:none;margin:0}
+      .print-page:last-child{page-break-after:avoid}
     }
   </style>
 </head>
 <body>
   <div class="no-print">
-    <h1>🖨️ QRコード一括印刷（全${locs.length}か所・1ページ1ロケーション）</h1>
+    <h1>🖨️ QRコード一括印刷（全${locs.length}か所）</h1>
     <div class="no-print-btns">
       <button class="btn btn-print" onclick="window.print()">🖨️ 印刷する</button>
       <button class="btn btn-close" onclick="window.close()">✕ 閉じる</button>
@@ -639,7 +794,7 @@ app.get('/admin/qr/print-all', requireAdmin, async (req, res) => {
 </html>`);
 });
 
-// ===== QRコード個別印刷ページ =====
+// ===== QRコード個別印刷 =====
 app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
   const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [req.params.token]);
   if (!loc) return res.redirect('/admin/qr');
@@ -652,18 +807,18 @@ app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
   <meta charset="UTF-8">
   <title>${loc.name} QRコード</title>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Hiragino Sans','Meiryo',sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; background:white; }
-    .print-card { text-align:center; padding:40px; border:3px solid #4f46e5; border-radius:16px; width:340px; }
-    .title { font-size:1.4rem; font-weight:bold; color:#1e1b4b; margin-bottom:8px; }
-    .subtitle { font-size:1.1rem; font-weight:bold; color:#4f46e5; margin-bottom:24px; padding:8px 16px; background:#e0e7ff; border-radius:8px; display:inline-block; }
-    .qr-img { width:260px; height:260px; margin:0 auto 20px; display:block; }
-    .instruction { font-size:0.85rem; color:#444; line-height:1.6; background:#f0f4ff; border-radius:8px; padding:12px; margin-bottom:20px; }
-    .no-print { margin-top:20px; display:flex; gap:10px; justify-content:center; }
-    .btn { padding:10px 20px; border-radius:8px; font-size:0.9rem; cursor:pointer; border:none; font-weight:bold; }
-    .btn-print { background:#4f46e5; color:white; }
-    .btn-close { background:#e5e7eb; color:#374151; }
-    @media print { .no-print { display:none; } }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Hiragino Sans','Meiryo',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:white}
+    .print-card{text-align:center;padding:40px;border:3px solid #4f46e5;border-radius:16px;width:340px}
+    .title{font-size:1.4rem;font-weight:bold;color:#1e1b4b;margin-bottom:8px}
+    .subtitle{font-size:1.1rem;font-weight:bold;color:#4f46e5;margin-bottom:24px;padding:8px 16px;background:#e0e7ff;border-radius:8px;display:inline-block}
+    .qr-img{width:260px;height:260px;margin:0 auto 20px;display:block}
+    .instruction{font-size:0.85rem;color:#444;line-height:1.6;background:#f0f4ff;border-radius:8px;padding:12px;margin-bottom:20px}
+    .no-print{margin-top:20px;display:flex;gap:10px;justify-content:center}
+    .btn{padding:10px 20px;border-radius:8px;font-size:0.9rem;cursor:pointer;border:none;font-weight:bold}
+    .btn-print{background:#4f46e5;color:white}
+    .btn-close{background:#e5e7eb;color:#374151}
+    @media print{.no-print{display:none}}
   </style>
 </head>
 <body>
@@ -671,11 +826,7 @@ app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
     <p class="title">出勤登録QRコード</p>
     <p class="subtitle">${loc.name}</p>
     <img src="${qrDataUrl}" alt="${loc.name}" class="qr-img">
-    <div class="instruction">
-      📱 スマートフォンのカメラで<br>
-      このQRコードを読み取って<br>
-      出勤登録を行ってください
-    </div>
+    <div class="instruction">📱 スマートフォンのカメラで<br>このQRコードを読み取って<br>出勤登録を行ってください</div>
     <div class="no-print">
       <button class="btn btn-print" onclick="window.print()">🖨️ 印刷する</button>
       <button class="btn btn-close" onclick="window.close()">✕ 閉じる</button>
@@ -688,15 +839,23 @@ app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
 // ===== 管理者：ユーザー管理 =====
 app.get('/admin/users', requireAdmin, async (req, res) => {
   const result = req.query.result ? decodeURIComponent(req.query.result) : '';
-  const users = await query(`SELECT id, attendance_code, role, is_active, created_at FROM users ORDER BY is_active DESC, attendance_code`);
-  const rows = users.map(u => `
+  const users = await query(`SELECT id, attendance_code, role, is_active, failed_attempts, locked_until, must_change_password, created_at FROM users ORDER BY is_active DESC, attendance_code`);
+  const now = new Date();
+  const rows = users.map(u => {
+    const isLocked = u.locked_until && new Date(u.locked_until) > now;
+    return `
     <tr style="${!u.is_active ? 'opacity:0.5; background:#f9fafb;' : ''}">
       <td style="padding:14px 12px;">${u.attendance_code}</td>
       <td style="padding:14px 12px;">${u.role === 'admin' ? '管理者' : '職員'}</td>
-      <td style="padding:14px 12px;"><span class="badge ${u.is_active ? 'badge-normal' : 'badge-caution'}">${u.is_active ? '有効' : '無効'}</span></td>
-      <td style="padding:14px 12px;">${u.created_at}</td>
+      <td style="padding:14px 12px;">
+        <span class="badge ${u.is_active ? 'badge-normal' : 'badge-caution'}">${u.is_active ? '有効' : '無効'}</span>
+        ${isLocked ? '<span class="badge badge-caution" style="margin-left:4px;">🔒 ロック中</span>' : ''}
+        ${u.must_change_password ? '<span class="badge" style="background:#fef3c7;color:#92400e;margin-left:4px;">PW要変更</span>' : ''}
+      </td>
+      <td style="padding:14px 12px;">${u.failed_attempts || 0}回</td>
       <td style="padding:14px 12px; white-space:nowrap;">
         <a href="/admin/users/${u.id}/edit" style="color:#4f46e5; font-size:0.85rem; margin-right:10px;">✏️ 編集</a>
+        ${isLocked ? `<a href="/admin/users/${u.id}/unlock" style="color:#22c55e; font-size:0.85rem; margin-right:10px;">🔓 ロック解除</a>` : ''}
         <a href="/admin/users/${u.id}/toggle"
            style="color:${u.is_active ? '#f97316' : '#22c55e'}; font-size:0.85rem; margin-right:10px;"
            onclick="return confirm('${u.is_active ? '無効にしますか？' : '有効にしますか？'}')">
@@ -708,7 +867,8 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
           🗑️ 削除
         </a>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   res.send(layout('ユーザー管理', `
     <div class="card">
@@ -720,8 +880,7 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
       <div class="message message-info" style="font-size:0.85rem;">
         CSVファイルの形式：<strong>出勤用ID,パスワード,権限</strong><br>
         権限は <code>staff</code>（職員）または <code>admin</code>（管理者）<br>
-        例：<code>1234,user123,staff</code><br>
-        ※ 既に登録済みのIDはスキップされます
+        ※ 初回登録時は必ずパスワード変更を促す設定になります
       </div>
       <form id="uploadForm" method="POST" action="/admin/users/upload" enctype="multipart/form-data" style="margin-bottom:24px;">
         <div class="form-group">
@@ -736,23 +895,22 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
       <div class="table-wrapper">
         <table>
           <thead>
-            <tr><th>出勤用ID</th><th>権限</th><th>状態</th><th>登録日時</th><th>操作</th></tr>
+            <tr><th>出勤用ID</th><th>権限</th><th>状態</th><th>失敗回数</th><th>操作</th></tr>
           </thead>
           <tbody>${rows || '<tr><td colspan="5" style="text-align:center">データがありません</td></tr>'}</tbody>
         </table>
       </div>
     </div>
-  `, true));
+  `, { role: 'admin' }));
 });
 
-// CSVアップロード処理
+// CSVアップロード
 app.post('/admin/users/upload', requireAdmin, (req, res) => {
   let body = '';
   req.on('data', chunk => { body += chunk.toString('binary'); });
   req.on('end', async () => {
     const boundary = req.headers['content-type'].split('boundary=')[1];
     const parts = body.split('--' + boundary);
-
     let csvContent = '';
     for (const part of parts) {
       if (part.includes('filename=') && part.includes('.csv')) {
@@ -762,46 +920,35 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
         break;
       }
     }
-
-    if (!csvContent) {
-      return res.redirect('/admin/users?result=' + encodeURIComponent('CSVファイルが読み込めませんでした'));
-    }
+    if (!csvContent) return res.redirect('/admin/users?result=' + encodeURIComponent('CSVファイルが読み込めませんでした'));
 
     const lines = csvContent.split('\n').filter(l => l.trim());
     let success = 0, skipped = 0, errors = 0;
-
     for (const line of lines) {
       const cols = line.trim().split(',');
       if (cols.length < 2) { errors++; continue; }
       const code = cols[0].trim();
       const pass = cols[1].trim();
       const role = (cols[2] || 'staff').trim();
-      if (!code || !pass) { errors++; continue; }
-      if (!['staff', 'admin'].includes(role)) { errors++; continue; }
-
+      if (!code || !pass || !['staff', 'admin'].includes(role)) { errors++; continue; }
       const exists = await queryOne('SELECT id FROM users WHERE attendance_code = $1', [code]);
       if (exists) { skipped++; continue; }
-
       try {
         const hash = bcrypt.hashSync(pass, 10);
         await query(
-          `INSERT INTO users (attendance_code, login_id, password_hash, role) VALUES ($1, $2, $3, $4)`,
+          `INSERT INTO users (attendance_code, login_id, password_hash, role, must_change_password) VALUES ($1, $2, $3, $4, 1)`,
           [code, code, hash, role]
         );
         success++;
-      } catch (e) {
-        errors++;
-      }
+      } catch (e) { errors++; }
     }
-
     await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'CSV_UPLOAD',
       `成功:${success} スキップ:${skipped} エラー:${errors}`, req.ip);
-
-    res.redirect(`/admin/users?result=${encodeURIComponent(`登録成功:${success}名 / スキップ(重複):${skipped}名 / エラー:${errors}件`)}`);
+    res.redirect(`/admin/users?result=${encodeURIComponent(`登録成功:${success}名 / スキップ:${skipped}名 / エラー:${errors}件`)}`);
   });
 });
 
-// ユーザー編集画面
+// ユーザー編集
 app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
   const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.params.id]);
   if (!user) return res.redirect('/admin/users');
@@ -814,21 +961,22 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
       </p>
       <h2>ユーザー編集</h2>
       ${msg}
-      <div class="confirm-item">
-        <span class="label">出勤用ID</span>
-        <span class="value">${user.attendance_code}</span>
-      </div>
+      <div class="confirm-item"><span class="label">出勤用ID</span><span class="value">${user.attendance_code}</span></div>
       <div style="margin-top:24px;">
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">パスワード変更</h3>
         <form method="POST" action="/admin/users/${user.id}/password" style="margin-bottom:20px;">
           <div class="form-group">
-            <label>新しいパスワード</label>
+            <label>新しいパスワード（6文字以上）</label>
             <input type="password" name="password" required minlength="6" placeholder="6文字以上">
           </div>
           <div class="form-group">
             <label>確認用パスワード</label>
             <input type="password" name="password_confirm" required minlength="6" placeholder="もう一度入力">
           </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:0.9rem;">
+            <input type="checkbox" name="must_change" checked>
+            次回ログイン時にパスワード変更を強制する
+          </label>
           <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">🔑 パスワード変更</button>
         </form>
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">権限変更</h3>
@@ -844,22 +992,24 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
         </form>
       </div>
     </div>
-  `, true));
+  `, { role: 'admin' }));
 });
 
-// パスワード変更処理
+// パスワード変更（管理者による）
 app.post('/admin/users/:id/password', requireAdmin, async (req, res) => {
-  const { password, password_confirm } = req.body;
+  const { password, password_confirm, must_change } = req.body;
   if (password !== password_confirm) {
     return res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('パスワードが一致しません')}`);
   }
   const hash = bcrypt.hashSync(password, 10);
-  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.params.id]);
+  const mustChange = must_change ? 1 : 0;
+  await query('UPDATE users SET password_hash = $1, must_change_password = $2, failed_attempts = 0, locked_until = NULL WHERE id = $3',
+    [hash, mustChange, req.params.id]);
   await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'PASSWORD_CHANGE', `対象ID:${req.params.id}`, req.ip);
   res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('パスワードを変更しました')}`);
 });
 
-// 権限変更処理
+// 権限変更
 app.post('/admin/users/:id/role', requireAdmin, async (req, res) => {
   const { role } = req.body;
   if (!['staff', 'admin'].includes(role)) return res.redirect('/admin/users');
@@ -879,6 +1029,13 @@ app.get('/admin/users/:id/toggle', requireAdmin, async (req, res) => {
   res.redirect('/admin/users');
 });
 
+// ロック解除
+app.get('/admin/users/:id/unlock', requireAdmin, async (req, res) => {
+  await query('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1', [req.params.id]);
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_UNLOCK', `対象ID:${req.params.id}`, req.ip);
+  res.redirect('/admin/users');
+});
+
 // ユーザー削除
 app.get('/admin/users/:id/delete', requireAdmin, async (req, res) => {
   const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.params.id]);
@@ -894,16 +1051,11 @@ app.get('/admin/logs', requireAdmin, async (req, res) => {
   const logs = await query('SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 300');
   const roleLabel = { admin: '管理者', staff: '職員' };
   const actionLabel = {
-    LOGIN: 'ログイン',
-    LOGIN_FAIL: 'ログイン失敗',
-    LOGOUT: 'ログアウト',
-    ATTENDANCE: '出勤登録',
-    CSV_UPLOAD: 'CSVアップロード',
-    USER_TOGGLE: 'ユーザー有効/無効変更',
-    USER_DELETE: 'ユーザー削除',
-    PASSWORD_CHANGE: 'パスワード変更',
-    ROLE_CHANGE: '権限変更',
-    EXCEL_EXPORT: 'Excel出力',
+    LOGIN: 'ログイン', LOGIN_FAIL: 'ログイン失敗', LOGOUT: 'ログアウト',
+    ATTENDANCE: '出勤登録', CSV_UPLOAD: 'CSVアップロード',
+    USER_TOGGLE: 'ユーザー有効/無効変更', USER_DELETE: 'ユーザー削除',
+    USER_UNLOCK: 'ロック解除',
+    PASSWORD_CHANGE: 'パスワード変更', ROLE_CHANGE: '権限変更', EXCEL_EXPORT: 'Excel出力',
   };
   const rows = logs.map(l => `
     <tr>
@@ -938,7 +1090,7 @@ app.get('/admin/logs', requireAdmin, async (req, res) => {
         </table>
       </div>
     </div>
-  `, true));
+  `, { role: 'admin' }));
 });
 
 // ===== サーバー起動 =====
@@ -946,9 +1098,6 @@ initDB().then(() => {
   app.listen(PORT, () => {
     console.log(`QR Attendance App started.`);
     console.log(`http://localhost:${PORT}`);
-    console.log(`\nテストアカウント:`);
-    console.log(`  管理者: ID=9001 / PW=admin123`);
-    console.log(`  職員:   ID=1234 / PW=user123`);
   });
 }).catch(err => {
   console.error('DB初期化エラー:', err);
