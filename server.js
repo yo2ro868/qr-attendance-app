@@ -1,4 +1,4 @@
-// server.js — QRコード式出勤管理アプリ（セキュリティ強化版）
+﻿// server.js — QRコード式出勤管理アプリ（セキュリティ強化版）
 
 const express = require('express');
 const session = require('express-session');
@@ -964,7 +964,7 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
       <div class="confirm-item"><span class="label">出勤用ID</span><span class="value">${user.attendance_code}</span></div>
       <div style="margin-top:24px;">
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">パスワード変更</h3>
-        <form method="POST" action="/admin/users/${user.id}/password" style="margin-bottom:20px;">
+        <form method="POST" action="/admin/users/${user.id}/reset-password" style="margin-bottom:20px;">
           <div class="form-group">
             <label>新しいパスワード（6文字以上）</label>
             <input type="password" name="password" required minlength="6" placeholder="6文字以上">
@@ -977,7 +977,7 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
             <input type="checkbox" name="must_change" checked>
             次回ログイン時にパスワード変更を強制する
           </label>
-          <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">🔑 パスワード変更</button>
+          <button type="submit" class="btn btn-danger" style="width:auto; padding:10px 24px;" onclick="return confirm('パスワードを初期化しますか？')">🔄 パスワードを初期化する</button>
         </form>
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">権限変更</h3>
         <form method="POST" action="/admin/users/${user.id}/role">
