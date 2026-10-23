@@ -102,7 +102,7 @@ async function initDB() {
     { name: 'S-J',             token: 'loc-008' },
     { name: 'S-K',             token: 'loc-009' },
     { name: 'S-T',             token: 'loc-010' },
-    { name: '次室',            token: 'loc-011' },
+    { name: 'J',               token: 'loc-011' },
   ];
   // 既存の設置場所も、ここに書いた名称で更新する
   for (const l of locations) {
