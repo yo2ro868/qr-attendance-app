@@ -100,8 +100,8 @@ async function initDB() {
     { name: '5',               token: 'loc-006' },
     { name: 'H',               token: 'loc-007' },
     { name: 'S-J',             token: 'loc-008' },
-    { name: '総務課会計情報係', token: 'loc-009' },
-    { name: '総務課図書係',    token: 'loc-010' },
+    { name: 'S-K',             token: 'loc-009' },
+    { name: 'S-T',             token: 'loc-010' },
     { name: '次室',            token: 'loc-011' },
   ];
   // 既存の設置場所も、ここに書いた名称で更新する
