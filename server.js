@@ -92,21 +92,23 @@ async function initDB() {
 
   // 初期データ投入
   const locations = [
-    { name: '基本法制監理部', token: 'loc-001' },
-    { name: '第1部',           token: 'loc-002' },
-    { name: '第2部',           token: 'loc-003' },
-    { name: '第3部',           token: 'loc-004' },
-    { name: '第4部',           token: 'loc-005' },
-    { name: '第5部',           token: 'loc-006' },
-    { name: '法制主幹',        token: 'loc-007' },
-    { name: '総務課人事総務係', token: 'loc-008' },
+    { name: 'K',               token: 'loc-001' },
+    { name: '1',               token: 'loc-002' },
+    { name: '2',               token: 'loc-003' },
+    { name: '3',               token: 'loc-004' },
+    { name: '4',               token: 'loc-005' },
+    { name: '5',               token: 'loc-006' },
+    { name: 'H',               token: 'loc-007' },
+    { name: 'S-J',             token: 'loc-008' },
     { name: '総務課会計情報係', token: 'loc-009' },
     { name: '総務課図書係',    token: 'loc-010' },
     { name: '次室',            token: 'loc-011' },
   ];
+  // 既存の設置場所も、ここに書いた名称で更新する
   for (const l of locations) {
     await query(
-      `INSERT INTO qr_locations (name, qr_token) VALUES ($1, $2) ON CONFLICT (qr_token) DO NOTHING`,
+      `INSERT INTO qr_locations (name, qr_token) VALUES ($1, $2)
+       ON CONFLICT (qr_token) DO UPDATE SET name = EXCLUDED.name`,
       [l.name, l.token]
     );
   }
