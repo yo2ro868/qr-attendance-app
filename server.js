@@ -282,8 +282,8 @@ app.get('/', async (req, res) => {
       </button>
     </form>
     
-    </div>
-  `, { role: req.session.role }));
+
+  `);
 });
 
 app.post('/change-password', requireLogin, async (req, res) => {
