@@ -174,7 +174,7 @@ async function logOperation(userId, code, role, action, detail, ip) {
 
 function layout(title, body, user) {
   const nav = user ? `<header><h1>出勤管理システム</h1><div style="display:flex;gap:12px;align-items:center;">
-    ${user.role === 'staff' ? `<a href="/change-password" style="color:white;text-decoration:none;font-size:0.8rem;background:rgba(255,255,255,0.2);padding:4px 10px;border-radius:6px;">🔑 PW変更</a>` : ''}
+    ${user.role === 'staff' ? `<a href="/change-password" style="font-size:0.8rem;padding:4px 10px;">🔑 PW変更</a>` : ''}
     <a href="/logout">ログアウト</a>
   </div></header>` : '';
   return `<!DOCTYPE html>
