@@ -8,7 +8,7 @@
 
 body {
   font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
-  background: #f0f4f8;
+  background: #e8f1fb;
   color: #333;
   min-height: 100vh;
 }
@@ -239,7 +239,7 @@ tr:hover td {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  background: #e8f1fb;
 }
 
 .login-card {
