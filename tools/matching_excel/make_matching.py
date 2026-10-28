@@ -194,7 +194,7 @@ for r in range(2, LEAVE_LAST + 1):
     ws[f"H{r}"] = f'=IF(OR({key(leave_col("A"))}="",{leave_col("B")}=""),"",{key(leave_col("A"))}&"|"&{leave_col("B")})'
     ws[f"I{r}"] = f'=IF(H{r}="","",IFERROR(MATCH({key(leave_col("A"))}&"|"&({leave_col("B")}-1),$H$2:$H${LEAVE_LAST},0),""))'
     y = leave_col("B")
-    hire, leave = leave_col("H"), leave_col("I")
+    hire, leave = leave_col("G"), leave_col("H")
     ws[f"Q{r}"] = f'=IF(H{r}="","",IF({hire}="",DATE({y},1,1),MAX(DATE({y},1,1),{hire})))'
     ws[f"R{r}"] = f'=IF(H{r}="","",IF({leave}="",DATE({y},12,31),MIN(DATE({y},12,31),{leave})))'
     ws[f"S{r}"] = (f'=IF(H{r}="","",IF(R{r}<Q{r},-1,DATEDIF(Q{r},R{r}+1,"m")'
@@ -203,8 +203,9 @@ for r in range(2, LEAVE_LAST + 1):
                    f'IF(AND({hire}="",{leave}=""),{GRANT_DEFAULT},'
                    f'IF(S{r}<0,0,CHOOSE(MIN(S{r},11)+1,{",".join(str(d) for d in PRORATED)})))))')
     ws[f"O{r}"] = f'=IF(H{r}="","",ROUND(N({leave_col("D")})*{DAY_MIN}+N({leave_col("E")})*1440,0))'
+    # 活用開始時に手入力する繰越分も、繰越のルールどおり1日未満は切り捨て・上限20日
     ws[f"J{r}"] = (f'=IF(H{r}="","",IF(I{r}<>"",INDEX($L$2:$L${LEAVE_LAST},I{r}),'
-                   f'ROUND(N({leave_col("F")})*{DAY_MIN}+N({leave_col("G")})*1440,0)))')
+                   f'MIN({CARRY_MAX},INT(N({leave_col("F")})))*{DAY_MIN}))')
     ws[f"K{r}"] = f'=IF(H{r}="","",MIN({TOTAL_MAX * DAY_MIN},J{r}+P{r}*{DAY_MIN}))'
     ws[f"L{r}"] = (f'=IF(H{r}="","",MIN({CARRY_MAX * DAY_MIN},'
                    f'INT(MAX(0,K{r}-O{r})/{DAY_MIN})*{DAY_MIN}))')
@@ -311,8 +312,8 @@ ws.print_title_rows = "3:4"
 # 上の欄の育児時間（1月〜12月）は細い列1本ずつ（O〜Z）を使う。
 # 日付の表の行はセルを結合せず、2本ごとに外枠を引いて1つの欄に見せる（一括印刷で結合が増えすぎないように）。
 R = "照合結果"
-BLOCK = 46            # 1人分の行数（改ページ単位）
-TOP = 11              # 日付の表の見出し行（ブロック先頭からの位置）
+BLOCK = 47            # 1人分の行数（改ページ単位）
+TOP = 12              # 日付の表の見出し（下の段）の行（ブロック先頭からの位置）。上の段はその1行上
 f_label = Font(name=FONT, size=10, bold=True, color="1E3A5F")
 fill_label = PatternFill("solid", fgColor="E8EEF5")
 fill_white = PatternFill(fill_type=None)
@@ -400,15 +401,18 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
     # 取得時間は月別取得時間シートのその年・区分の行から表示する（AC{t+4}〜AC{t+5}=その行の位置）
     value_font = Font(name=FONT, size=11, bold=True)
     box(ws, f"A{t + 1}", f"B{t + 3}", "所属")
-    box(ws, f"C{t + 1}", f"L{t + 3}", None, value_font, fill_white, left)
+    box(ws, f"C{t + 1}", f"K{t + 3}", None, value_font, fill_white, left)
     box(ws, f"A{t + 4}", f"B{t + 6}", "氏名")
-    box(ws, f"C{t + 4}", f"L{t + 6}",
+    box(ws, f"C{t + 4}", f"K{t + 6}",
         f'=IF({P1}="","",IF({P2}="","★名簿に未登録",INDEX({N}!$B$2:$B${NAME_LAST},{P2})&""))',
         value_font, fill_white, left)
     small_label = Font(name=FONT, size=8, bold=True, color="1E3A5F")
     hour_font = Font(name=FONT, size=8)
-    # 見出し（取得時間・1月〜12月）は2行分の高さ、その下に区分ごとに「その月」と「累計」の2行
-    box(ws, f"M{t + 1}", f"N{t + 2}", "取得時間", small_label)
+    # L列は2〜7行目を結合して縦書きの「取得時間」。M:N は区分名、O〜Z は月
+    box(ws, f"L{t + 1}", f"L{t + 6}", "取得時間", f_label,
+        align=Alignment(horizontal="center", vertical="center", text_rotation=255))
+    # 見出し（1月〜12月）は2行分の高さ、その下に区分ごとに「その月」と「累計」の2行
+    box(ws, f"M{t + 1}", f"N{t + 2}", None, small_label)
     for i, col in enumerate(SUB[12:]):          # O〜Z
         box(ws, f"{col}{t + 1}", f"{col}{t + 2}", f"{i + 1}月", small_label)
     for j, cat in enumerate(HOUR_CATS):
@@ -460,14 +464,19 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
     ws.row_dimensions[r + 1].height = 24
     ws.row_dimensions[t + 10].height = 8
 
-    # 日付の表
+    # 日付の表（見出しは2段：上の段に「休暇等の日数」（年次休暇〜欠勤）、日付・曜日・出勤・備考は2段分）
     hr = t + TOP
+    gr = hr - 1
     head_font = Font(name=FONT, size=9, bold=True, color="FFFFFF")
     for col, text in (("A", "日付"), ("B", "曜日")):
-        c = ws[f"{col}{hr}"]
-        c.value, c.font, c.fill, c.alignment, c.border = text, head_font, fill_head, wrap, border
-    for (text, _), (first, last) in zip(TABLE, SPANS):
-        box(ws, f"{first}{hr}", f"{last}{hr}", text, head_font, fill_head, wrap)
+        box(ws, f"{col}{gr}", f"{col}{hr}", text, head_font, fill_head, wrap)
+    for k, ((text, _), (first, last)) in enumerate(zip(TABLE, SPANS)):
+        if k in (0, len(TABLE) - 1):            # 出勤・備考
+            box(ws, f"{first}{gr}", f"{last}{hr}", text, head_font, fill_head, wrap)
+        else:
+            box(ws, f"{first}{hr}", f"{last}{hr}", text, head_font, fill_head, wrap)
+    box(ws, f"{SPANS[1][0]}{gr}", f"{SPANS[-2][1]}{gr}", "休暇等の日数", head_font, fill_head, center)
+    ws.row_dimensions[gr].height = 18
     ws.row_dimensions[hr].height = 30
     for d in range(31):
         r = hr + 1 + d
@@ -598,29 +607,27 @@ ws.freeze_panes = "A2"
 # ===== 年次休暇（職員ごと・年ごとに1行。入力欄と、自動計算の表示） =====
 ws = wb.create_sheet("年次休暇")
 header(ws, 1, ["出勤用ID", "年（西暦）", "本年分（日）\n空欄は自動", "本年使用\n（日）", "本年使用\n（時間）",
-               "繰越分（日）\n活用開始時のみ", "繰越分（時間）\n活用開始時のみ", "採用日\n（年の途中のみ）",
-               "退職日\n（年の途中のみ）", "備考",
+               "繰越分（日）\n活用開始時のみ", "採用日\n（年の途中のみ）", "退職日\n（年の途中のみ）", "備考",
                "本年分\n（自動）", "繰越分\n（自動）", "合計\n（自動）", "翌年繰越\n（自動）"],
-       [12, 10, 11, 9, 9, 13, 13, 12, 12, 20, 9, 15, 15, 15])
+       [12, 10, 11, 9, 9, 13, 12, 12, 20, 9, 15, 15, 15])
 ws.row_dimensions[1].height = 32
 for c in ws[1]:
     c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-style_range(ws, 2, LEAVE_LAST, 1, 10, fill=fill_input, align=center)
+style_range(ws, 2, LEAVE_LAST, 1, 9, fill=fill_input, align=center)
 style_range(ws, 2, LEAVE_LAST, 1, 1, fmt="@", align=center)
-for col in (5, 7):      # 時間の欄は「時間:分」で入力（例 2:15）
-    style_range(ws, 2, LEAVE_LAST, col, col, fill=fill_input, fmt="[h]:mm", align=center)
-style_range(ws, 2, LEAVE_LAST, 8, 9, fill=fill_input, fmt="yyyy/m/d", align=center)
-style_range(ws, 2, LEAVE_LAST, 11, 14, fill=fill_calc, align=center)
+style_range(ws, 2, LEAVE_LAST, 5, 5, fill=fill_input, fmt="[h]:mm", align=center)   # 時間は「時間:分」（例 2:15）
+style_range(ws, 2, LEAVE_LAST, 7, 8, fill=fill_input, fmt="yyyy/m/d", align=center)
+style_range(ws, 2, LEAVE_LAST, 10, 13, fill=fill_calc, align=center)
 for r in range(2, LEAVE_LAST + 1):
-    ws[f"J{r}"].alignment = left
-    ws[f"K{r}"] = f'=IF(INDEX({K}!$H:$H,ROW())="","",INDEX({K}!$P:$P,ROW())&"日")'
-    for col, src in (("L", "J"), ("M", "K"), ("N", "L")):
+    ws[f"I{r}"].alignment = left
+    ws[f"J{r}"] = f'=IF(INDEX({K}!$H:$H,ROW())="","",INDEX({K}!$P:$P,ROW())&"日")'
+    for col, src in (("K", "J"), ("L", "K"), ("M", "L")):
         ws[f"{col}{r}"] = f'=IF(INDEX({K}!$H:$H,ROW())="","",{days_text(f"INDEX({K}!${src}:${src},ROW())")})'
 ws["A2"], ws["B2"], ws["C2"], ws["D2"], ws["E2"] = "1234", 2026, 20, 5, time(2, 15)
-ws["F2"], ws["G2"], ws["J2"] = 10, time(3, 30), "（例）この行は例です。削除してください"
+ws["F2"], ws["I2"] = 10, "（例）この行は例です。削除してください"
 ws.freeze_panes = "A2"
-ws["P1"] = "使い方"
-ws["P1"].font = f_bold
+ws["O1"] = "使い方"
+ws["O1"].font = f_bold
 for i, text in enumerate([
     "・職員ごと・年ごとに1行入力します（例：出勤用ID 1234 の2026年分）。",
     f"・本年分（その年に付与された日数）は、通年で勤務する場合は空欄のままで構いません（{GRANT_DEFAULT}日として計算）。",
@@ -630,13 +637,13 @@ for i, text in enumerate([
     "・年次休暇は15分単位で取得できます。時間は「時間:分」で入力します（例：2時間15分 → 2:15）。",
     f"・1日は7時間45分として計算します。7時間45分以上の時間は自動で日数に繰り上がります。",
     "・繰越分は、前の年の行があれば、その行の「翌年繰越」が自動で入ります。",
-    "・活用開始時（前の年の行がない年）だけ、F列・G列に繰越分（日と時間）を手入力してください。",
+    f"・活用開始時（前の年の行がない年）だけ、F列に繰越分の日数を手入力してください。繰越分は日単位なので、1日未満の端数は切り捨てます（上限{CARRY_MAX}日）。",
     f"・合計は繰越分＋本年分です（上限{TOTAL_MAX}日）。",
     f"・翌年繰越は、残り（合計−本年使用）の1日未満の端数を切り捨てた日数です（上限{CARRY_MAX}日）。繰越分と本年分は区別しません。",
     "・ここで入力した内容は、出勤簿の「年次休暇 取得日数」の欄に表示されます。",
 ], start=2):
-    ws[f"P{i}"] = text
-    ws[f"P{i}"].font = f_note
+    ws[f"O{i}"] = text
+    ws[f"O{i}"].font = f_note
 
 # ===== 月別取得時間（職員ごと・年ごと・区分ごとに1行。1月〜12月の取得時間を入力） =====
 ws = wb.create_sheet("月別取得時間")
