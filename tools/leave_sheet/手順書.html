@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>休暇申請用紙 手順書</title>
+<style>
+  body { font-family: "Yu Gothic UI", "Meiryo", sans-serif; font-size: 15px; line-height: 1.7; color: #222; background: #fff; max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 24px; color: #1e3a5f; border-bottom: 3px solid #1e3a5f; padding-bottom: 6px; }
+  h2 { font-size: 19px; color: #fff; background: #1e3a5f; padding: 6px 12px; margin-top: 40px; }
+  h3 { font-size: 16px; color: #1e3a5f; border-left: 5px solid #1e3a5f; padding-left: 8px; margin-top: 28px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; font-size: 14px; }
+  th, td { border: 1px solid #bbb; padding: 5px 8px; vertical-align: top; text-align: left; }
+  th { background: #e8eef5; white-space: nowrap; }
+  .k { font-family: Consolas, "BIZ UDGothic", monospace; background: #f3f3f3; padding: 1px 4px; border-radius: 3px; }
+  pre { background: #f3f3f3; padding: 10px 12px; overflow-x: auto; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+  .note { background: #fff8e1; border: 1px solid #f0d58c; padding: 8px 12px; margin: 12px 0; }
+  .warn { background: #fdecea; border: 1px solid #f1a9a0; padding: 8px 12px; margin: 12px 0; }
+  .toc { background: #f5f7fa; border: 1px solid #d5dde8; padding: 8px 20px; }
+  .sw { display: inline-block; width: 14px; height: 14px; border: 1px solid #999; vertical-align: middle; margin-right: 4px; }
+  ol li, ul li { margin: 3px 0; }
+  @media print { h2 { break-before: page; } h2:first-of-type { break-before: auto; } body { font-size: 12px; } }
+</style>
+</head>
+<body>
+
+<h1>休暇申請用紙 手順書（Excel ＋ OneDrive）</h1>
+
+<p>職員ごとに1つの Excel の申請用紙を、管理者の OneDrive に置き、<strong>本人と所属長だけ</strong>に共有して使う仕組みです。
+本人が申請を書き、所属長が承認欄に入力します。管理者は「休暇集計」で全員分をまとめ、別途引き渡す照合用Excel に写します。
+Power Automate・Forms・共有フォルダは使いません。</p>
+
+<pre>
+本人 ── 自分の申請用紙（Excel の Web 版）に書く ──▶ 所属長に一声かける（Notes・口頭）
+所属長 ── 同じ申請用紙の承認欄に「承認」「却下」を入れる
+本人 ── 申請用紙の上で、残日数・承認待ちを確かめる（自動計算）
+管理者 ── 休暇集計（デスクトップ版 Excel）で［すべて更新］──▶ 照合用Excel に写す・貼り付ける
+</pre>
+
+<div class="toc">
+<strong>目次</strong>
+<ol>
+  <li>この一式に入っているもの・必要なもの</li>
+  <li>事前確認</li>
+  <li>申請用紙を置くフォルダを作る</li>
+  <li>職員ごとの申請用紙を作る</li>
+  <li>本人と所属長に共有する</li>
+  <li>職員・所属長への案内</li>
+  <li>集計して照合用Excel に反映する</li>
+  <li>運用</li>
+  <li>うまくいかないとき</li>
+</ol>
+</div>
+
+<h2>1. この一式に入っているもの・必要なもの</h2>
+<table>
+  <tr><th>ファイル</th><th>内容</th></tr>
+  <tr><td>手順書.html</td><td>この手順書</td></tr>
+  <tr><td>休暇申請用紙（ひな形）.xlsx</td><td>職員ごとにコピーして使う申請用紙のひな形（「申請」「使い方」シート）</td></tr>
+  <tr><td>休暇集計.xlsx</td><td>全員の申請用紙を読み込んで、申請の一覧と、照合用Excel に写す値を作る（管理者だけが使う）</td></tr>
+</table>
+<ul>
+  <li>職員・所属長：組織のアカウントで、ブラウザから Excel（Web 版）を使えること</li>
+  <li>管理者：OneDrive で<strong>特定の人だけ</strong>にファイルを共有できること、管理者のパソコンに<strong>デスクトップ版の Excel</strong>と <strong>OneDrive の同期</strong>があること</li>
+  <li>別途引き渡す<strong>照合用Excel</strong>（出勤用ID と年次休暇の持ち日数をここから写します）</li>
+</ul>
+
+<h3>申請用紙の色分け</h3>
+<p><span class="sw" style="background:#FFF2CC"></span>本人が入力
+<span class="sw" style="background:#DDEBF7"></span>所属長が入力
+<span class="sw" style="background:#E2EFDA"></span>管理者が入力
+<span class="sw" style="background:#F2F2F2"></span>自動（計算式）</p>
+<ul>
+  <li><strong>基本</strong>（管理者）：出勤用ID・氏名・所属長・年・年次休暇の持ち日数・導入前の使用。シートの保護で、本人・所属長は書き換えられません。</li>
+  <li><strong>年次休暇の残り</strong>（自動）：持ち日数・使用済み（承認済み）・承認待ち・残り、病気休暇と看護休暇の取得時間（その年・承認済み）。1日＝7時間45分。</li>
+  <li><strong>申請</strong>（1件1行、300行まで）：本人が 申請日〜事由、所属長が 承認・承認日・コメント を入力。「確認」の欄に、15分単位になっていない・月をまたいでいる、などの注意が自動で出ます。</li>
+</ul>
+
+<h2>2. 事前確認</h2>
+<ol>
+  <li><strong>特定の人への共有</strong>：OneDrive で適当なファイルを右クリック →［共有］→ 共有の設定（歯車や「リンクの設定」）で<strong>「特定のユーザー」</strong>を選べるか確かめます。組織の人を1人指定し、その人がリンクから開けるかも確かめます。</li>
+  <li><strong>OneDrive の同期</strong>：管理者のパソコンのエクスプローラーの左側に「OneDrive - （組織名）」があり、Web で作ったファイルが見えるか確かめます。</li>
+  <li><strong>デスクトップ版の Excel</strong>：管理者のパソコンで Excel を起動でき、［データ］タブに［データの取得］があるか確かめます。</li>
+</ol>
+<div class="note">「特定のユーザー」を選べない場合は、組織の設定で共有が制限されています。情報システム担当に確認してください。</div>
+
+<h2>3. 申請用紙を置くフォルダを作る</h2>
+<ol>
+  <li>ブラウザで OneDrive を開き、<strong>［＋ 作成またはアップロード］→［フォルダー］</strong>で「休暇申請」というフォルダを作ります。</li>
+  <li>一式の <span class="k">休暇申請用紙（ひな形）.xlsx</span> は、このフォルダの<strong>外</strong>（例：OneDrive の「ドキュメント」）にアップロードしておきます。</li>
+</ol>
+<div class="warn"><strong>「休暇申請」フォルダそのものは共有しないでください。</strong>フォルダを共有すると、中の全員分の申請用紙が見えてしまいます。共有は、次の 5 で<strong>ファイル1つずつ</strong>行います。</div>
+
+<h2>4. 職員ごとの申請用紙を作る</h2>
+<p>職員1人ごとに、次をくり返します。</p>
+<ol>
+  <li>OneDrive で ひな形 を右クリック →［コピー］→ コピー先に「休暇申請」フォルダを選びます。</li>
+  <li>コピーしたファイルを右クリック →［名前の変更］で <span class="k">休暇申請_出勤用ID_氏名.xlsx</span> にします（例：<span class="k">休暇申請_1234_山田太郎.xlsx</span>）。<br>
+    <strong>名前は必ず「休暇申請_」で始めます</strong>（集計はこの名前のファイルだけを読みます）。</li>
+  <li>ファイルを開き（Excel の Web 版）、<strong>［校閲］→［シートの保護の解除］</strong>を押します（「シートの保護」ボタンを押して解除する画面のこともあります）。</li>
+  <li>緑の欄（4行目）に入力します。
+    <table>
+      <tr><th>欄</th><th>入れるもの</th></tr>
+      <tr><td>出勤用ID</td><td>照合用Excel の「職員名簿」と同じ ID</td></tr>
+      <tr><td>氏名・所属長</td><td>本人の氏名、所属長の氏名</td></tr>
+      <tr><td>年</td><td>今の年（西暦。例 2026）</td></tr>
+      <tr><td>年次休暇の持ち日数（日）</td><td>照合用Excel の「年次休暇」シートの、その年の「合計（自動）」の日数（繰越分＋本年分）</td></tr>
+      <tr><td>導入前の使用（日）・（時間）</td><td>この申請用紙を使い始める前に、その年にすでに使った年次休暇。時間は「時間:分」（例 2:15）。なければ空欄</td></tr>
+    </table>
+  </li>
+  <li><strong>［校閲］→［シートの保護］</strong>で保護を戻します（パスワードは不要）。</li>
+</ol>
+<div class="note">シートの保護は、本人や所属長がうっかり計算式や基本の欄を消さないためのものです。パスワードをかけていないので、［シートの保護の解除］を押せば誰でも外せます。気になる場合は、保護するときにパスワードを付けてください（パスワードは管理者だけが控えておきます）。</div>
+
+<h2>5. 本人と所属長に共有する</h2>
+<ol>
+  <li>OneDrive で、その職員の申請用紙を右クリック →<strong>［共有］</strong>。</li>
+  <li>共有の設定（「リンクの設定」や歯車）で<strong>「特定のユーザー」</strong>を選び、<strong>編集可</strong>にします。</li>
+  <li>宛先に<strong>本人</strong>と<strong>所属長</strong>の組織のアカウントを入れます。</li>
+  <li>Outlook のメールは使えないので、［送信］ではなく<strong>［リンクのコピー］</strong>でリンクをコピーし、Notes で本人と所属長に送ります（次の 6 の案内文に貼り付けます）。</li>
+  <li>共有できたかは、ファイルを右クリック →［アクセス許可の管理］（または［詳細］）で確かめられます。<strong>本人と所属長の2人だけ</strong>になっていることを確かめます。</li>
+</ol>
+<div class="note">所属長が同じ職員が何人もいる場合も、共有はファイルごとに行います。所属長は、自分の部下の申請用紙のリンクを人数分受け取ります（ブラウザのお気に入りに入れてもらうと便利です）。</div>
+
+<h2>6. 職員・所属長への案内（Notes で送る文の例）</h2>
+<pre>件名：休暇申請用紙のご案内
+
+（氏名）さん
+
+休暇の申請は、次の Excel の申請用紙で行います。この用紙は、ご本人と所属長だけが開けます。
+（ここに申請用紙のリンクを貼り付け）
+
+■ 申請のしかた
+・リンクを開き（組織のアカウントでサインイン）、「申請」シートの黄色の欄に1件1行で書きます。
+・休暇の種類と単位は一覧から選びます。1日単位は 開始日・終了日・日数、時間単位は 開始日・時間（例 2:15）を書きます。
+・書いたら、所属長にお知らせください。
+・上の「年次休暇の残り」で、残日数と承認待ちを確かめられます。
+・承認された行は書き換えないでください。取り消すときは所属長にお知らせください。
+
+■ 所属長の方へ
+・青の欄（承認・承認日・コメント）に入力してください。承認欄が空欄の行は「承認待ち」です。</pre>
+
+<h2>7. 集計して照合用Excel に反映する（管理者のパソコン）</h2>
+<h3>はじめに一度だけ</h3>
+<ol>
+  <li>エクスプローラーで「OneDrive - （組織名）」の中の「休暇申請」フォルダを右クリック →<strong>［このデバイス上に常に保持する］</strong>。</li>
+  <li>一式の <span class="k">休暇集計.xlsx</span> を、<strong>「休暇申請」フォルダの外</strong>（例：パソコンのドキュメント）に置き、デスクトップ版の Excel で開きます。</li>
+  <li>黄色いバーに「セキュリティの警告　外部データ接続が無効になっています」と出たら、<strong>［コンテンツの有効化］</strong>を押します。</li>
+  <li>「設定」シートの <strong>B3</strong> に「休暇申請」フォルダの場所を入れます。エクスプローラーでフォルダを開き、上のアドレス欄をクリックすると出る文字（例：<span class="k">C:\Users\（ユーザー名）\OneDrive - （組織名）\休暇申請</span>）をコピーして貼り付けます。</li>
+  <li><strong>B4</strong> に集計する年を入れて、上書き保存します。</li>
+</ol>
+<h3>集計するたびに</h3>
+<ol>
+  <li>休暇集計.xlsx を開き、<strong>［データ］→［すべて更新］</strong>を押します（全員の申請用紙を読み直します。人数によって数十秒かかります）。</li>
+  <li><strong>申請一覧</strong>シート：全員の申請が出ます。見出しの ▼ で、状況（承認待ち・承認・却下・取消）や「確認」の注意を絞り込めます。読み取れなかった申請用紙は先頭に出ます。</li>
+  <li><strong>照合用_年次休暇</strong>シート：本年使用（日）・本年使用（時間）を、照合用Excel の「年次休暇」シートの同じ出勤用ID・年の行に写します（承認済みの年次休暇と、導入前の使用の合計です）。</li>
+  <li><strong>照合用_月別取得時間</strong>シート：見出しを除いてコピーし、照合用Excel の「月別取得時間」シートに<strong>値で貼り付け</strong>ます（同じ ID・年・区分の古い行は消します）。病気休暇・看護休暇の1日単位は、1日＝7時間45分として時間にしています。</li>
+</ol>
+<div class="note">集計は、承認欄が「承認」の行だけを数えます。日付は開始日で、その年・その月に入れます。</div>
+
+<h2>8. 運用</h2>
+<ul>
+  <li><strong>承認後の書き換え</strong>：本人は編集できるので、承認済みの行を書き換えることもできてしまいます。気になる行は、申請用紙を右クリック →［バージョン履歴］で、いつ誰が変えたかを確かめ、元に戻せます。</li>
+  <li><strong>取り消し</strong>：所属長が承認欄を「取消」にします（残日数・集計から外れます）。</li>
+  <li><strong>異動・所属長の交代</strong>：申請用紙の［アクセス許可の管理］で、前の所属長の共有を外して新しい所属長を加え、基本の「所属長」を書き換えます。退職した職員の申請用紙は、集計が終わったら「休暇申請」フォルダの外（保管用のフォルダ）に移します。</li>
+  <li><strong>年が変わるとき（1月）</strong>：
+    <ol>
+      <li>前の年の集計を終え、照合用Excel に反映します（B4 を前の年にして［すべて更新］）。</li>
+      <li>照合用Excel で新しい年の「合計」（繰越分＋本年分）が出たら、各申請用紙の基本の<strong>年</strong>と<strong>持ち日数</strong>を新しい年のものにし、<strong>導入前の使用は空欄</strong>にします。前の年の申請の行はそのまま残しておきます（残日数は「年」の行だけで計算します）。</li>
+    </ol>
+  </li>
+  <li><strong>行が足りなくなったとき</strong>：申請は1ファイル300行までです。いっぱいになったら、新しい申請用紙を作って共有し直し、古いものは保管用のフォルダに移します。</li>
+  <li><strong>新しい職員</strong>：4・5・6 を行います。</li>
+</ul>
+
+<h2>9. うまくいかないとき</h2>
+<table>
+  <tr><th>状態</th><th>対処</th></tr>
+  <tr><td>本人・所属長がリンクを開けない</td><td>共有の宛先が組織のアカウントになっているか、［アクセス許可の管理］で確かめます。組織のアカウントでサインインしてから開いてもらいます</td></tr>
+  <tr><td>申請用紙で入力できない欄がある</td><td>保護されている欄（基本・計算式・残日数）は入力できません。黄色・青の欄に入力します</td></tr>
+  <tr><td>「年次休暇の残り」が出ない、0 のまま</td><td>基本の「年」と、申請の開始日の年が同じか確かめます</td></tr>
+  <tr><td>集計で［すべて更新］を押すとエラーになる</td><td>「設定」シートの B3 のフォルダの場所が正しいか、［コンテンツの有効化］を押したか確かめます</td></tr>
+  <tr><td>申請一覧に「このファイルを読み取れませんでした」</td><td>そのファイルの「基本」「申請」の表の名前や見出しが変わっていないか確かめます。分からなければ、ひな形から作り直して申請を写します</td></tr>
+  <tr><td>ある人の申請が集計に出ない</td><td>ファイル名が「休暇申請_」で始まっているか、「休暇申請」フォルダの中にあるか、同期が終わっているか（エクスプローラーでファイルに緑のチェックが付いているか）を確かめます</td></tr>
+</table>
+
+</body>
+</html>
