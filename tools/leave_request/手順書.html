@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>休暇申請システム 手順書</title>
+<style>
+  body { font-family: "Yu Gothic UI", "Meiryo", sans-serif; font-size: 15px; line-height: 1.7; color: #222; background: #fff; max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 24px; color: #1e3a5f; border-bottom: 3px solid #1e3a5f; padding-bottom: 6px; }
+  h2 { font-size: 19px; color: #fff; background: #1e3a5f; padding: 6px 12px; margin-top: 40px; }
+  h3 { font-size: 16px; color: #1e3a5f; border-left: 5px solid #1e3a5f; padding-left: 8px; margin-top: 28px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; font-size: 14px; }
+  th, td { border: 1px solid #bbb; padding: 5px 8px; vertical-align: top; text-align: left; }
+  th { background: #e8eef5; white-space: nowrap; }
+  code, .k { font-family: Consolas, "BIZ UDGothic", monospace; background: #f3f3f3; padding: 1px 4px; border-radius: 3px; }
+  pre { background: #f3f3f3; padding: 10px 12px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  .note { background: #fff8e1; border: 1px solid #f0d58c; padding: 8px 12px; margin: 12px 0; }
+  .toc { background: #f5f7fa; border: 1px solid #d5dde8; padding: 8px 20px; }
+  ol li, ul li { margin: 3px 0; }
+  @media print { h2 { break-before: page; } h2:first-of-type { break-before: auto; } body { font-size: 12px; } }
+</style>
+</head>
+<body>
+
+<h1>休暇申請システム 手順書（Microsoft Forms ＋ Power Automate）</h1>
+
+<p>Microsoft Forms で休暇を申請し、Power Automate で上司の承認を取り、結果を Excel の台帳（休暇申請台帳.xlsx）に記録する仕組みです。
+台帳の集計を、別途引き渡す<strong>照合用Excel</strong>の「年次休暇」「月別取得時間」シートに写して使います。</p>
+
+<pre>
+職員 ──Forms「休暇申請」──▶ Power Automate ──▶ 台帳に追加（承認待ち）
+                                   ├─▶ 承認者に承認依頼（Teams / Outlook）→ 承認・却下
+                                   ├─▶ 台帳に結果を記録
+                                   └─▶ 申請者に結果と残日数をメール
+職員 ──Forms「残日数照会」──▶ Power Automate ──▶ 残日数をメールで返信
+管理者 ── 台帳で「照合用Excel用に集計」を実行 ──▶ 照合用Excel に写す・貼り付ける
+</pre>
+
+<div class="toc">
+<strong>目次</strong>
+<ol>
+  <li>この一式に入っているもの・必要なもの（事前確認を含む）</li>
+  <li>台帳を置く</li>
+  <li>Office Script を登録する</li>
+  <li>フォームを作る</li>
+  <li>フロー「休暇申請」を作る</li>
+  <li>フロー「残日数照会」を作る</li>
+  <li>試しに申請してみる</li>
+  <li>運用</li>
+  <li>照合用Excel への反映</li>
+</ol>
+</div>
+
+<h2>1. この一式に入っているもの・必要なもの</h2>
+
+<table>
+  <tr><th>ファイル</th><th>内容</th></tr>
+  <tr><td>手順書.html</td><td>この手順書</td></tr>
+  <tr><td>休暇申請台帳.xlsx</td><td>台帳の空の様式（職員・年次休暇の持ち日数・申請・集計のシート）</td></tr>
+  <tr><td>スクリプト\1_申請を登録.txt</td><td>申請を台帳に追加し、承認依頼の宛先と本文を作る</td></tr>
+  <tr><td>スクリプト\2_承認結果を記録.txt</td><td>承認・却下を台帳に書き、申請者への結果メールの本文を作る</td></tr>
+  <tr><td>スクリプト\3_残日数を照会.txt</td><td>残日数のメール本文を作る</td></tr>
+  <tr><td>スクリプト\4_照合用Excel用に集計.txt</td><td>照合用Excel に写す形で集計する（管理者が手で実行）</td></tr>
+</table>
+
+<p>作業するPCに特別なソフトを入れる必要はありません。ブラウザで Microsoft 365 に入れれば作業できます。必要なのは次のものです。</p>
+<ul>
+  <li>Microsoft 365 の Forms・Power Automate・Excel（Web 版）・SharePoint（または OneDrive）</li>
+  <li>Excel（Web 版）の［自動化］タブ（Office Script）。タブが出ないときは、組織の Microsoft 365 管理者（情報システム担当）に有効化を確認してください。</li>
+  <li>フローで使うのは Microsoft Forms・Excel Online (Business)・承認・Office 365 Outlook の4つ（いずれも標準のコネクタ）</li>
+  <li>別途引き渡す<strong>照合用Excel</strong>（出勤用ID と年次休暇の持ち日数をここから写します）</li>
+</ul>
+
+<h3>事前確認（最初に10分ほどで）</h3>
+<p>Office Script と、Power Automate からの実行が使えるかを先に確かめます。ここで止まる場合は、2 以降に進まずに情報システム担当に相談してください。</p>
+<ol>
+  <li>Excel（Web 版）で新しい空のブックを作り、OneDrive に「スクリプト確認」などの名前で保存します。</li>
+  <li>リボンに<strong>［自動化］タブ</strong>があることを確かめます。</li>
+  <li>［自動化］→［新しいスクリプト］を開き、中身を全部消して次を貼り付け、名前を「確認用」にして［実行］します。A1 に「Office Script OK」と出れば OK です。
+<pre>function main(workbook: ExcelScript.Workbook) {
+  workbook.getActiveWorksheet().getRange("A1").setValue("Office Script OK");
+}</pre>
+  </li>
+  <li>A1 を消してから、Power Automate で［作成］→［インスタント クラウド フロー］（トリガー＝手動でフローをトリガーします）を作り、Excel Online (Business)「スクリプトの実行」を追加します。場所＝OneDrive for Business、ファイル＝スクリプト確認、スクリプト＝確認用 を選んで保存し、［テスト］で実行します。A1 に「Office Script OK」と出れば OK です。</li>
+  <li>うまくいったら、確認用のフロー・スクリプト・ブックは削除してかまいません。</li>
+</ol>
+<div class="note">［自動化］タブがない、「スクリプトの実行」が見つからない、「データ損失防止（DLP）ポリシー」のエラーが出る、のどれかなら、ライセンスか管理者の設定で止められています。情報システム担当に「Office Scripts と、Power Automate からの Office Scripts の実行が有効か」「Forms・Excel Online (Business)・承認・Office 365 Outlook のコネクタを一緒に使えるか」を確認してください。</div>
+
+<h2>2. 台帳を置く</h2>
+<ol>
+  <li>一式の <span class="k">休暇申請台帳.xlsx</span> を、SharePoint のドキュメントライブラリ（管理者だけが見られる場所）か、フローを作る人の OneDrive にアップロードします。氏名が入るので、共有の範囲は管理者に限ってください。</li>
+  <li>Excel（Web 版）で開き、<strong>「職員」</strong>シートの表に、職員ごとに次を入れます。
+    <ul>
+      <li>メールアドレス：Forms に回答するときの組織のアカウント</li>
+      <li>出勤用ID：<strong>照合用Excel の「職員名簿」シートと同じ ID</strong></li>
+      <li>氏名</li>
+      <li>承認者メールアドレス：この人に承認依頼が届きます</li>
+    </ul>
+  </li>
+  <li><strong>「年次休暇の持ち日数」</strong>シートの表に、職員ごと・年ごとに1行入れます。
+    <ul>
+      <li>合計（日）：その年に使える日数（繰越分＋本年分）。<strong>照合用Excel の「年次休暇」シートの「合計（自動）」</strong>の日数を写します。</li>
+      <li>導入前の使用（日）・（時間）：この仕組みを使い始める前に、その年にすでに使った年次休暇。時間は「時間:分」（例 <span class="k">2:15</span>）。</li>
+    </ul>
+  </li>
+</ol>
+<div class="note">表（テーブル）の名前（職員・持ち日数・申請）と見出しの文字はスクリプトが使っています。列の追加や見出しの変更はしないでください。行を足すときは、表の最後の行のすぐ下に入力すると表が広がります。</div>
+
+<h2>3. Office Script を登録する</h2>
+<ol>
+  <li>台帳を Excel（Web 版）で開き、<strong>［自動化］タブ →［新しいスクリプト］</strong>を開きます。</li>
+  <li>一式の <span class="k">スクリプト\1_申請を登録.txt</span> をメモ帳で開き、<strong>全部選択（Ctrl＋A）してコピー</strong>し、スクリプトの編集画面の中身を全部消してから貼り付けます。</li>
+  <li>スクリプト名を <strong>申請を登録</strong> に変えて保存します。</li>
+  <li>残りの3つも同じようにします（名前は 承認結果を記録／残日数を照会／照合用Excel用に集計）。</li>
+</ol>
+<div class="note">スクリプトは登録した人の OneDrive（ドキュメント ＞ Office Scripts）に保存されます。フローも<strong>同じ人のアカウント</strong>で作ってください。</div>
+
+<h2>4. フォームを作る</h2>
+
+<h3>フォーム「休暇申請」</h3>
+<p>Forms で［新しいフォーム］を作り、［設定］を次のようにします。</p>
+<ul>
+  <li>回答できるユーザー：<strong>組織内のユーザーのみ</strong>、<strong>名前を記録</strong>をオン（回答者のメールアドレスで本人を見分けます）</li>
+  <li>1人につき1つの回答：オフ（何度でも申請できるように）</li>
+</ul>
+<div class="note"><strong>Q1 と Q4 の選択肢の文字は、下の表のとおり正確に入れてください。</strong>台帳の集計や残日数の計算に使います（かっこは全角）。</div>
+
+<p><strong>セクション1　休暇の種類</strong></p>
+<table>
+  <tr><th>質問</th><th>形式</th><th>必須</th><th>選択肢・設定</th></tr>
+  <tr><td>Q1 休暇の種類</td><td>選択肢</td><td>○</td><td>年次休暇／病気休暇／看護休暇（子の看護等）／特別休暇（看護休暇以外）／介護休暇／介護時間／育児時間／職務専念義務の免除</td></tr>
+</table>
+<p>Q1 の分岐（質問の［…］→［分岐を追加］）：特別休暇（看護休暇以外）→ セクション2、職務専念義務の免除 → セクション3、それ以外 → セクション4。</p>
+
+<p><strong>セクション2　特別休暇の種別</strong>（このセクションの次は セクション4）</p>
+<table>
+  <tr><th>質問</th><th>形式</th><th>必須</th><th>選択肢・設定</th></tr>
+  <tr><td>Q2 特別休暇の種別</td><td>ドロップダウン</td><td>○</td><td>選挙権の行使等／官公署への出頭／骨髄・末梢血幹細胞の提供／ボランティア／結婚／不妊治療／産前／産後／保育時間／妻の出産／育児参加／短期介護／忌引（親族の死亡）／父母の追悼／夏季休暇／現住居の滅失等／その他</td></tr>
+</table>
+<p>休暇制度の資料の特別休暇一覧表の事由をもとにしています。職場で使うものに合わせて増減してかまいません（台帳にはそのまま文字で入ります）。</p>
+
+<p><strong>セクション3　職務専念義務の免除</strong>（このセクションの次は セクション4）</p>
+<table>
+  <tr><th>質問</th><th>形式</th><th>必須</th><th>選択肢・設定</th></tr>
+  <tr><td>Q3 免除の内容</td><td>テキスト</td><td>○</td><td>例：健康診断、研修 など</td></tr>
+</table>
+
+<p><strong>セクション4　取得の単位</strong></p>
+<table>
+  <tr><th>質問</th><th>形式</th><th>必須</th><th>選択肢・設定</th></tr>
+  <tr><td>Q4 取得の単位</td><td>選択肢</td><td>○</td><td>1日単位／時間単位</td></tr>
+</table>
+<p>Q4 の分岐：1日単位 → セクション5、時間単位 → セクション6。</p>
+
+<p><strong>セクション5　1日単位</strong>（このセクションの次は セクション7）</p>
+<p>セクションの説明に「月をまたぐときは月ごとに分けて申請してください」と書いておきます（病気休暇・看護休暇を月ごとに正しく集計するため）。</p>
+<table>
+  <tr><th>質問</th><th>形式</th><th>必須</th><th>選択肢・設定</th></tr>
+  <tr><td>Q5 開始日</td><td>日付</td><td>○</td><td></td></tr>
+  <tr><td>Q6 終了日</td><td>日付</td><td></td><td>1日だけなら空欄</td></tr>
+  <tr><td>Q7 日数</td><td>テキスト</td><td>○</td><td>［…］→［制限］数値、1 以上 31 以下。説明「土日・祝日を除いた日数」</td></tr>
+</table>
+
+<p><strong>セクション6　時間単位</strong>（このセクションの次は セクション7）</p>
+<table>
+  <tr><th>質問</th><th>形式</th><th>必須</th><th>選択肢・設定</th></tr>
+  <tr><td>Q8 取得日</td><td>日付</td><td>○</td><td></td></tr>
+  <tr><td>Q9 時間</td><td>テキスト</td><td>○</td><td>［制限］数値、0 以上 7 以下</td></tr>
+  <tr><td>Q10 分</td><td>テキスト</td><td>○</td><td>［制限］数値、0 以上 59 以下。説明「年次休暇は15分単位、介護時間・育児時間は30分単位」</td></tr>
+  <tr><td>Q11 時刻</td><td>テキスト</td><td></td><td>例：13:00〜15:15</td></tr>
+</table>
+
+<p><strong>セクション7　事由</strong></p>
+<table>
+  <tr><th>質問</th><th>形式</th><th>必須</th><th>選択肢・設定</th></tr>
+  <tr><td>Q12 事由・備考</td><td>テキスト（長い回答）</td><td></td><td>年次休暇は空欄でかまいません</td></tr>
+</table>
+
+<h3>フォーム「残日数照会」</h3>
+<p>もう1つ、短いフォームを作ります（設定は「休暇申請」と同じ：組織内のみ・名前を記録・何度でも回答可）。</p>
+<table>
+  <tr><th>質問</th><th>形式</th><th>必須</th><th>選択肢・設定</th></tr>
+  <tr><td>照会する年（西暦）</td><td>テキスト</td><td></td><td>［制限］数値。空欄なら今年</td></tr>
+</table>
+
+<h2>5. フロー「休暇申請」を作る</h2>
+<p>Power Automate で［作成］→［自動化したクラウド フロー］を選びます。各欄をクリックすると、前のアクションの値（「動的なコンテンツ」）を一覧から選べます。</p>
+<ol>
+  <li><strong>トリガー</strong>：Microsoft Forms「新しい応答が送信されるとき」（フォーム＝休暇申請）</li>
+  <li><strong>Microsoft Forms「応答の詳細を取得する」</strong>：フォーム＝休暇申請、応答 ID＝トリガーの「応答 ID」</li>
+  <li><strong>Excel Online (Business)「スクリプトの実行」</strong>：場所・ドキュメント ライブラリ・ファイル＝休暇申請台帳.xlsx、スクリプト＝申請を登録。引数は次のとおりです（未回答の質問は空のまま渡されます）。
+    <table>
+      <tr><th>引数</th><th>入れるもの</th></tr>
+      <tr><td>responseId</td><td>トリガーの「応答 ID」</td></tr>
+      <tr><td>submittedAt</td><td>「送信時刻」</td></tr>
+      <tr><td>email</td><td>「回答者のメール」</td></tr>
+      <tr><td>kind</td><td>Q1 休暇の種類</td></tr>
+      <tr><td>specialKind</td><td>Q2 特別休暇の種別</td></tr>
+      <tr><td>exemptDetail</td><td>Q3 免除の内容</td></tr>
+      <tr><td>unit</td><td>Q4 取得の単位</td></tr>
+      <tr><td>dayStart ／ dayEnd ／ days</td><td>Q5 開始日 ／ Q6 終了日 ／ Q7 日数</td></tr>
+      <tr><td>timeDate ／ hours ／ minutes ／ timeRange</td><td>Q8 取得日 ／ Q9 時間 ／ Q10 分 ／ Q11 時刻</td></tr>
+      <tr><td>reason</td><td>Q12 事由・備考</td></tr>
+    </table>
+  </li>
+  <li><strong>条件</strong>：3 の結果の <span class="k">found</span> が <span class="k">true</span> に等しい
+    <ul>
+      <li><strong>いいえ</strong>のとき：Office 365 Outlook「メールの送信 (V2)」で管理者あてに「職員表に登録のないメールアドレスから申請がありました」と送ります（本文に <span class="k">detailsHtml</span>）。ここで終わり。</li>
+      <li><strong>はい</strong>のとき：次の 5〜7 をこちらに入れます。</li>
+    </ul>
+  </li>
+  <li><strong>承認「開始して承認を待機」</strong>
+    <ul>
+      <li>承認の種類：承認/拒否 - 最初に応答</li>
+      <li>タイトル：<span class="k">title</span>　担当者：<span class="k">approverEmail</span>　詳細：<span class="k">details</span></li>
+    </ul>
+  </li>
+  <li><strong>Excel Online (Business)「スクリプトの実行」</strong>：スクリプト＝承認結果を記録
+    <table>
+      <tr><th>引数</th><th>入れるもの</th></tr>
+      <tr><td>responseId</td><td>トリガーの「応答 ID」</td></tr>
+      <tr><td>outcome</td><td>承認の「結果」</td></tr>
+      <tr><td>approver</td><td>［式］タブに <code>first(outputs('開始して承認を待機')?['body/responses'])?['responder/displayName']</code></td></tr>
+      <tr><td>comments</td><td>［式］タブに <code>first(outputs('開始して承認を待機')?['body/responses'])?['comments']</code></td></tr>
+    </table>
+    式の中の <span class="k">開始して承認を待機</span> は 5 のアクションの名前です。名前を変えたときは、変えた名前（空白は <span class="k">_</span> に置き換え）にします。
+  </li>
+  <li><strong>Office 365 Outlook「メールの送信 (V2)」</strong>：宛先＝6 の結果の <span class="k">email</span>、件名＝<span class="k">subject</span>、本文＝<span class="k">bodyHtml</span></li>
+</ol>
+<div class="note">承認者が応答しないまま 30 日たつと、フローは止まります（Power Automate の上限）。その申請は台帳で「承認待ち」のまま残るので、管理者が状況を直すか、申請し直してもらいます。</div>
+
+<h2>6. フロー「残日数照会」を作る</h2>
+<ol>
+  <li>トリガー：Microsoft Forms「新しい応答が送信されるとき」（フォーム＝残日数照会）</li>
+  <li>「応答の詳細を取得する」</li>
+  <li>「スクリプトの実行」：スクリプト＝残日数を照会、email＝「回答者のメール」、year＝照会する年</li>
+  <li>「メールの送信 (V2)」：宛先＝「回答者のメール」、件名＝<span class="k">subject</span>、本文＝<span class="k">bodyHtml</span></li>
+</ol>
+
+<h2>7. 試しに申請してみる</h2>
+<ol>
+  <li>台帳の「職員」表に自分を入れ、承認者も自分にします。「年次休暇の持ち日数」にも自分の行を入れます。</li>
+  <li>休暇申請フォームで、年次休暇の1日単位と時間単位を1件ずつ申請します。</li>
+  <li>台帳の「申請」表に行が増え、Teams か Outlook に承認依頼が届くことを確かめます。</li>
+  <li>承認すると、台帳の状況が「承認」になり、結果メールに残日数が書かれていることを確かめます。</li>
+  <li>フローの実行履歴でエラーが出たら、どのアクションで止まったかを確認します（日付が読めない、などは台帳の「確認事項」列にも出ます）。</li>
+  <li>試しの行は、終わったら台帳の「申請」表から行ごと削除します。</li>
+</ol>
+
+<h2>8. 運用</h2>
+<ul>
+  <li><strong>申請の取り消し</strong>：台帳の「申請」表で状況を「取消」に書き換えます（残日数・集計から外れます）。</li>
+  <li><strong>確認事項</strong>：年次休暇の時間が15分単位でない、介護時間・育児時間が30分単位でない、月をまたいでいる、承認待ちを含めると年次休暇が足りない、などは「確認事項」列と承認依頼の本文に出ます。申請は受け付けたうえで、承認するかどうかは承認者が判断します。</li>
+  <li><strong>残日数</strong>：年次休暇の残り ＝ 持ち日数 − 導入前の使用 − 承認済みの申請（1日＝7時間45分）。承認待ちは別に表示します。年は開始日の年で数えます。</li>
+  <li><strong>毎年1月</strong>：照合用Excel で前年の翌年繰越が決まったら、「年次休暇の持ち日数」表に新しい年の行（合計＝照合用Excel の年次休暇シートの合計）を足します。</li>
+  <li><strong>職員の異動</strong>：「職員」表の行を追加・修正します。承認者が変わったときは承認者メールアドレスを書き換えます。</li>
+</ul>
+
+<h2>9. 照合用Excel への反映</h2>
+<ol>
+  <li>台帳の<strong>「集計」</strong>シートの B1 に年（西暦）を入れ、［自動化］タブから<strong>「照合用Excel用に集計」</strong>を実行します。</li>
+  <li><strong>A4 から下（年次休暇シート用）</strong>：本年使用（日）と本年使用（時間）を、照合用Excel の<strong>「年次休暇」シート</strong>の同じ出勤用ID・年の行の「本年使用（日）」「本年使用（時間）」の欄に写します。導入前の使用も含めた1年分の合計です。</li>
+  <li><strong>G4 から下（月別取得時間シート用）</strong>：見出しを除いてコピーし、照合用Excel の<strong>「月別取得時間」シート</strong>に行ごと貼り付けます（値の貼り付け）。同じ ID・年・区分の古い行は消してください（同じ行が2つあると上の行が使われます）。<br>
+    病気休暇・看護休暇の1日単位の申請は、1日＝7時間45分として時間にしています。</li>
+</ol>
+<p>照合用Excel の出勤簿の日付の表（年次休暇・病気休暇などの欄）は、これまでどおり手で記入します。日ごとの内容は、台帳の「申請」表を開始日で並べ替えると確認できます。</p>
+
+</body>
+</html>
