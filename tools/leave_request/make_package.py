@@ -2,7 +2,8 @@
 
 使い方: python make_package.py [出力先フォルダ]
 出力先を省略するとプロジェクト直下に 休暇申請システム一式（フォルダ）と 休暇申請システム一式.zip を作る（同じ名前は作り直し）。
-中身：手順書.html、休暇申請台帳.xlsx（空の様式）、スクリプト フォルダの .txt（Office Script。メモ帳で開いてコピーする）
+中身：手順書.html、休暇申請台帳.xlsx（空の様式）、スクリプト フォルダの .txt（Office Script。メモ帳で開いてコピーする）、
+      通知送信 フォルダ（組織のパソコンで Notes の通知を送る send_notices.ps1 と、それを起動する .cmd）
 引き渡し先のPCでは Python などは使わず、ブラウザの Microsoft 365 だけで作業する。
 """
 import shutil
@@ -21,9 +22,17 @@ if OUT.exists():
 shutil.copy(HERE / "手順書.html", OUT / "手順書.html")
 subprocess.run([sys.executable, str(HERE / "make_ledger.py"), str(OUT / "休暇申請台帳.xlsx")], check=True)
 for i, name in enumerate(SCRIPTS, start=1):
-    text = (HERE / "office_scripts" / f"{name}.ts").read_text(encoding="utf-8")
+    # Office Script は1ファイルで完結させる必要があるので、各スクリプトの後ろに共通部分を付ける
+    text = ((HERE / "office_scripts" / f"{name}.ts").read_text(encoding="utf-8")
+            + (HERE / "office_scripts" / "共通.ts").read_text(encoding="utf-8"))
     # メモ帳で文字化けしないように BOM 付き UTF-8・改行は CRLF
     (OUT / "スクリプト" / f"{i}_{name}.txt").write_text(text, encoding="utf-8-sig", newline="\r\n")
+
+# 組織のパソコンで Notes の通知を送るスクリプト（.ps1 は BOM 付き UTF-8 のまま）
+(OUT / "通知送信").mkdir()
+for f in (HERE / "notice_sender").iterdir():
+    if f.suffix in (".ps1", ".cmd"):
+        shutil.copy(f, OUT / "通知送信" / f.name)
 
 zip_path = shutil.make_archive(str(OUT), "zip", root_dir=OUT.parent, base_dir=OUT.name)
 print("作成しました:", OUT, zip_path)
