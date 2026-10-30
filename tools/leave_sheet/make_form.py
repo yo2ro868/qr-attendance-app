@@ -33,6 +33,7 @@ f_head = Font(name=FONT, size=10, bold=True, color="FFFFFF")
 f_title = Font(name=FONT, size=14, bold=True, color="1E3A5F")
 f_big = Font(name=FONT, size=12, bold=True, color="1E3A5F")
 f_note = Font(name=FONT, size=9, color="555555")
+fill_head = PatternFill("solid", fgColor="1E3A5F")     # 見出し（白い文字）
 fill_staff = PatternFill("solid", fgColor="FFF2CC")    # 本人が入力
 fill_boss = PatternFill("solid", fgColor="DDEBF7")     # 所属長が入力
 fill_admin = PatternFill("solid", fgColor="E2EFDA")    # 管理者が入力
@@ -68,7 +69,7 @@ COLS = [
     ("単位", 9, None, fill_staff),
     ("開始日", 11, "yyyy/m/d", fill_staff),
     ("終了日", 11, "yyyy/m/d", fill_staff),
-    ("日数", 6, "0.##", fill_staff),
+    ("日数", 10, "0.##", fill_staff),     # 幅は基本の「導入前の使用（時間）」の見出しに合わせる
     ("時間", 7, "[h]:mm", fill_staff),
     ("時刻", 13, None, fill_staff),
     ("事由", 22, None, fill_staff),
@@ -101,7 +102,7 @@ ws["G4"].number_format = "[h]:mm"
 t = Table(displayName="基本", ref="A3:G4")
 t.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False)
 ws.add_table(t)
-ws.row_dimensions[3].height = 30
+ws.row_dimensions[3].height = 44
 
 # ----- 6〜9行目：年次休暇の残り（自動）。9行目は分の計算用で非表示 -----
 rng = lambda c: f"${c}${FIRST}:${c}${LAST}"
@@ -134,7 +135,7 @@ ws["A10"] = "申請（1件1行。上から順に書きます）"
 ws["A10"].font = f_big
 for i, (label, _, fmt, fill) in enumerate(COLS, start=1):
     h = ws.cell(row=HEAD, column=i, value=label)
-    h.font, h.alignment, h.border = f_head, center, border
+    h.font, h.alignment, h.border, h.fill = f_head, center, border, fill_head
     for r in range(FIRST, LAST + 1):
         c = ws.cell(row=r, column=i)
         c.font, c.border, c.fill = f_base, border, fill
