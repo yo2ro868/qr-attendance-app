@@ -1,9 +1,11 @@
 """休暇申請用紙（職員1人に1ファイル）のひな形を作る。
 
 使い方: python make_form.py 出力先.xlsx
-管理者がこのひな形を職員ごとにコピーし（ファイル名は 休暇申請_出勤用ID_氏名.xlsx）、
+管理者がこのひな形を職員ごとにコピーし（ファイル名は 休暇申請_出勤用ID_氏名.xlsx。マクロ 申請用紙の作成.xlsm が作る）、
 管理者の OneDrive から本人（編集）と所属長（編集）にだけ共有して使う。
-「基本」「申請」の表の名前と見出しは、集計ブックの Power Query が参照するので変えないこと。
+出勤用ID・氏名はファイル名から読む。年・持ち日数・本年使用の調整は、照合用Excel の休暇等シートで一括管理し、
+マクロが非表示の「管理」シートに書き込む（本人・所属長には入力欄を見せない）。
+「申請」の表の名前と見出しは、照合用Excel・休暇集計の Power Query が参照するので変えないこと。
 """
 import sys
 from openpyxl import Workbook
@@ -36,7 +38,6 @@ f_note = Font(name=FONT, size=9, color="555555")
 fill_head = PatternFill("solid", fgColor="1E3A5F")     # 見出し（白い文字）
 fill_staff = PatternFill("solid", fgColor="FFF2CC")    # 本人が入力
 fill_boss = PatternFill("solid", fgColor="DDEBF7")     # 所属長が入力
-fill_admin = PatternFill("solid", fgColor="E2EFDA")    # 管理者が入力
 fill_calc = PatternFill("solid", fgColor="F2F2F2")     # 自動
 thin = Side(style="thin", color="BFBFBF")
 border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -69,7 +70,7 @@ COLS = [
     ("単位", 9, None, fill_staff),
     ("開始日", 11, "yyyy/m/d", fill_staff),
     ("終了日", 11, "yyyy/m/d", fill_staff),
-    ("日数", 10, "0.##", fill_staff),     # 幅は基本の「導入前の使用（時間）」の見出しに合わせる
+    ("日数", 6, "0.##", fill_staff),
     ("時間", 7, "[h]:mm", fill_staff),
     ("時刻", 13, None, fill_staff),
     ("事由", 22, None, fill_staff),
@@ -86,37 +87,43 @@ for i, (_, width, _, _) in enumerate(COLS, start=1):
 # ----- 1〜2行目：題名 -----
 ws["A1"] = "休暇申請用紙"
 ws["A1"].font = f_title
-ws["D1"] = "黄色：本人が入力　　青：所属長が入力　　緑：管理者が入力　　灰色：自動"
+ws["D1"] = "黄色：本人が入力　　青：所属長が入力　　灰色：自動"
 ws["D1"].font = f_note
 
-# ----- 3〜4行目：基本（管理者が入力） -----
-BASIC = ["出勤用ID", "氏名", "所属長", "年", "年次休暇の持ち日数（日）", "導入前の使用（日）", "導入前の使用（時間）"]
-for i, label in enumerate(BASIC, start=1):
-    h = ws.cell(row=3, column=i, value=label)
-    h.font, h.alignment, h.border = f_bold, center, border
-    v = ws.cell(row=4, column=i)
-    v.font, v.alignment, v.border, v.fill = f_base, center, border, fill_admin
-ws["A4"].number_format = "@"
-ws["D4"].number_format = "0"
-ws["G4"].number_format = "[h]:mm"
-t = Table(displayName="基本", ref="A3:G4")
-t.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=False)
-ws.add_table(t)
-ws.row_dimensions[3].height = 44
+# ----- 管理（非表示）：マクロ（申請用紙の作成.xlsm）が照合用Excel の休暇等シートから書き込む -----
+MG = "'管理'"
+YR, HOLD, ADJ = f"{MG}!$B$3", f"{MG}!$B$4", f"{MG}!$B$5"   # 年、持ち日数（分）、本年使用の調整（分）
+mg = wb.create_sheet("管理")
+for i, label in enumerate(["出勤用ID", "氏名", "年", "持ち日数（分）", "本年使用の調整（分）", "更新日時"], start=1):
+    mg[f"A{i}"] = label
+mg["B1"].number_format = "@"
+mg["C1"] = "このシートは マクロ（申請用紙の作成.xlsm）が書き込みます。手で変えないでください。"
+mg.sheet_state = "veryHidden"     # 本人・所属長からは見えない（Excel の［再表示］にも出ない）
+
+# ----- 3行目：氏名（管理シートから表示） -----
+ws["A3"] = "氏名"
+ws["A3"].font, ws["A3"].alignment, ws["A3"].border = f_bold, center, border
+ws.merge_cells("B3:C3")
+ws["B3"] = f"={MG}!$B$2&\"\""
+for col in "BC":
+    ws[f"{col}3"].font, ws[f"{col}3"].border, ws[f"{col}3"].fill = f_bold, border, fill_calc
+ws["B3"].alignment = center
+ws.row_dimensions[3].height = 22
 
 # ----- 6〜9行目：年次休暇の残り（自動）。9行目は分の計算用で非表示 -----
 rng = lambda c: f"${c}${FIRST}:${c}${LAST}"
 KIND, MIN, YEAR, OK = rng("B"), rng("O"), rng("P"), rng("K")
-ws["A6"] = '=IF($D$4="","年次休暇の残り（上の「年」が空欄です）",$D$4&"年の年次休暇")'
+ws["A6"] = f'=IF({YR}="","年次休暇の残り（管理者が設定すると表示されます）",{YR}&"年の年次休暇")'
 ws["A6"].font = f_big
 SUMMARY = [
-    ("持ち日数", f"=N($E$4)*{DAY_MIN}", days_text("A9")),
+    ("持ち日数", f"=N({HOLD})", days_text("A9")),
+    # 使用済み＝ 照合用Excel の調整（導入前の使用など）＋ この用紙の承認済みの年次休暇
     ("使用済み（承認済み）",
-     f'=N($F$4)*{DAY_MIN}+ROUND(N($G$4)*1440,0)+SUMIFS({MIN},{KIND},"年次休暇",{YEAR},$D$4,{OK},"承認")', days_text("B9")),
-    ("承認待ち", f'=SUMIFS({MIN},{KIND},"年次休暇",{YEAR},$D$4,{OK},"")', days_text("C9")),
+     f'=N({ADJ})+SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"承認")', days_text("B9")),
+    ("承認待ち", f'=SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"")', days_text("C9")),
     ("残り", "=A9-B9", days_text("D9")),
-    ("病気休暇（承認済み）", f'=SUMIFS({MIN},{KIND},"病気休暇",{YEAR},$D$4,{OK},"承認")', hm_text("E9")),
-    ("看護休暇（承認済み）", f'=SUMIFS({MIN},{KIND},"看護休暇（子の看護等）",{YEAR},$D$4,{OK},"承認")', hm_text("F9")),
+    ("病気休暇（承認済み）", f'=SUMIFS({MIN},{KIND},"病気休暇",{YEAR},{YR},{OK},"承認")', hm_text("E9")),
+    ("看護休暇（承認済み）", f'=SUMIFS({MIN},{KIND},"看護休暇（子の看護等）",{YEAR},{YR},{OK},"承認")', hm_text("F9")),
 ]
 for i, (label, minutes, text) in enumerate(SUMMARY, start=1):
     col = get_column_letter(i)
@@ -238,7 +245,7 @@ for i, text in enumerate([
     "・承認欄が空欄の行は「承認待ち」として数えます。",
     "",
     "■ 管理者",
-    "・緑の欄（出勤用ID・氏名・所属長・年・持ち日数・導入前の使用）は、管理者がシートの保護を解除して入力します（［校閲］→［シート保護の解除］。終わったら［シートの保護］）。",
+    "・年・持ち日数・本年使用の調整（導入前の使用など）は、照合用Excel の「休暇等」シートで全職員分を管理し、申請用紙の作成.xlsm の［申請用紙を更新］でこの用紙に書き込みます（非表示の「管理」シート）。",
     "・このファイルは管理者の OneDrive にあり、本人と所属長にだけ共有しています。ほかの人には見えません。",
 ], start=3):
     us[f"A{i}"] = text

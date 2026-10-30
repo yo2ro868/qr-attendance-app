@@ -24,7 +24,7 @@ let
                     日数の値 = 数(r[日数]),
                     時間の値 = 日の数(r[時間])
                 in
-                    [ファイル名 = f[ファイル名], 出勤用ID = f[出勤用ID], 氏名 = f[氏名], 所属長 = f[所属長],
+                    [ファイル名 = f[ファイル名], 出勤用ID = f[出勤用ID], 氏名 = f[氏名],
                      申請日 = 日付(r[申請日]), 休暇の種類 = 文字(r[休暇の種類]), #"種別・内容" = 文字(r[#"種別・内容"]),
                      単位 = 文字(r[単位]), 開始日 = 開始, 終了日 = 日付(r[終了日]),
                      日数 = if 日数の値 = 0 then null else 日数の値,
@@ -35,7 +35,7 @@ let
                      分 = Number.Round(日数の値 * 465 + 時間の値 * 1440),
                      年 = if 開始 = null then null else Date.Year(開始),
                      月 = if 開始 = null then null else Date.Month(開始)]),
-    型 = type table [ファイル名 = text, 出勤用ID = text, 氏名 = text, 所属長 = text, 申請日 = nullable date,
+    型 = type table [ファイル名 = text, 出勤用ID = text, 氏名 = text, 申請日 = nullable date,
         休暇の種類 = text, #"種別・内容" = text, 単位 = text, 開始日 = nullable date, 終了日 = nullable date,
         日数 = nullable number, 時間 = nullable number, 時刻 = text, 事由 = text, #"承認（所属長）" = text,
         承認日 = nullable date, 所属長コメント = text, 確認 = text, 分 = number, 年 = nullable number, 月 = nullable number],
