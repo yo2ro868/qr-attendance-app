@@ -40,17 +40,15 @@ left = Alignment(horizontal="left", vertical="center")
 P = "'出力データ貼付'"
 N = "'職員名簿'"
 K = "'計算用'"
-LV = "'年次休暇'"
-LEAVE_LAST = 1001     # 年次休暇シートの行数（2〜1001行目）
+LV = "'休暇等'"
+LEAVE_LAST = 1001     # 休暇等シートの行数（2〜1001行目）
 CARRY_MAX = 20        # 翌年に繰り越せる日数の上限
 GRANT_DEFAULT = 20    # 本年分が空欄のときの日数（通年で勤務する場合の付与日数）
 # 年の中途採用・退職者の本年分（在職期間が 1月に達するまで, 1月を超え2月に達するまで, … 11月を超え1年未満）
 PRORATED = [2, 3, 5, 7, 8, 10, 12, 13, 15, 17, 18, 20]
 TOTAL_MAX = 40        # 1年に使える日数（繰越分＋本年分）の上限
 DAY_MIN = 465         # 年次休暇の1日＝7時間45分＝465分（15分単位で取得できる）
-MH = "'月別取得時間'"
 HOL = "'祝日'!$A$2:$A$200"
-MH_LAST = 1501        # 月別取得時間シートの行数（2〜1501行目）
 HOUR_CATS = ["病気休暇", "看護休暇"]
 # 申請用紙の読み込みシート：休暇申請用紙（tools/leave_sheet）を Power Query で読んだ表を置く（add_queries.ps1 が作る）。
 # 表の見出しは5行目、データは6行目から。3行目に各表の行数（照合を速くするため、その行数の範囲だけを探す。
@@ -146,8 +144,8 @@ lines = [
     ("5. 「月次一覧」シートの B1 に対象年月（例：2026/10）を入力すると、職員ごと・日ごとの出勤（○）が表示されます。", False),
     ("6. 「出勤簿」シートの右側（AF2・AF3）で対象年月と出勤用ID（一覧から選択）を指定すると、その職員の1か月分の出勤簿（A4縦）が表示され、そのまま印刷できます。", False),
     ("    ※ 上の欄の題名は「令和〇年出勤簿」と自動で表示されます。所属の欄は記入用の空欄です。", False),
-    ("    ※ 病気休暇・看護休暇の各月の取得時間は、休暇申請用紙（承認済み）と「月別取得時間」シート（調整）を足して表示されます。", False),
-    ("    ※ 年次休暇の取得日数は「年次休暇」シートの内容が表示されます（本年使用は 休暇申請用紙の承認済み＋調整）。", False),
+    ("    ※ 病気休暇・看護休暇の各月の取得時間は、休暇申請用紙（承認済み）から表示されます（「休暇等」シートでも確かめられます）。", False),
+    ("    ※ 年次休暇の取得日数は「休暇等」シートの内容が表示されます（本年使用は 休暇申請用紙の承認済み＋調整）。", False),
     ("    ※ 出勤欄の○は自動で表示されます。年次休暇・病気休暇などの欄は、休暇申請用紙の承認済みの申請から自動で表示されます（上書きして手で書くこともできます）。欠勤・備考は記入用の空欄です。", False),
     (f"7. 全員分をまとめて印刷するときは、「一括印刷」シートの AF2 に対象年月を入力し、そのまま印刷（Ctrl+P）します。職員名簿の全員分の出勤簿が1人1枚で印刷されます（{BATCH}人まで）。", False),
     ("", False),
@@ -164,7 +162,7 @@ lines = [
     ("・月次一覧・出勤簿では、土曜・日曜・祝日・年末年始（12/29〜1/3）は赤で表示されます。祝日は「祝日」シートの一覧を使います。", False),
     ("・「計算用」シートは非表示にしています。消したり変更したりしないでください。", False),
     ("・休暇申請用紙：「申請用紙の読み込み」シートの B2 に申請用紙のフォルダを入れておくと、このファイルを開いたときに承認済みの申請を読み込みます（最新にするときは［データ］→［すべて更新］）。開いたときに「外部データ接続が無効」と出たら［コンテンツの有効化］を押してください。", False),
-    ("・年次休暇シートには、職員ごと・年ごとに本年分と、申請用紙に書かれていない使用があればその調整（日と時間。15分単位、1日＝7時間45分）を入力します。繰越分は前年の翌年繰越が自動で入ります（活用開始時のみ手入力）。翌年に繰り越せるのは本年分の残りだけで（一度繰り越した日数は更に繰り越せない）、上限は20日、1日未満の端数は切り捨てです。", False),
+    ("・休暇等シートには、職員ごと・年ごとに1行、本年分などと、申請用紙に書かれていない年次休暇の使用があればその調整（日と時間。15分単位、1日＝7時間45分）を入力します。本年使用・病気休暇・看護休暇は申請用紙から自動で表示されます。繰越分は前年の翌年繰越が自動で入ります（活用開始時のみ手入力）。翌年に繰り越せるのは本年分の残りだけで（一度繰り越した日数は更に繰り越せない）、上限は20日、1日未満の端数は切り捨てです。", False),
     ("・このファイルには氏名が含まれます。クラウドやメールで共有せず、管理者のPC内だけで保管してください。", False),
     ("・各シートの2行目に入っている（例）のデータは、使い始める前に削除してください。", False),
 ]
@@ -197,15 +195,17 @@ ws.freeze_panes = "A2"
 # ===== 計算用（非表示）：職員名簿の照合キーと重複 =====
 ws = wb.create_sheet("計算用")
 header(ws, 1, ["名簿の照合キー", "重複", "", "", "", "名簿の連番", "",
-                "年休キー（ID|年）", "前年の行", "繰越分（分）", "合計（分）", "翌年繰越（分）", "", "月別キー（ID|年|区分）",
-                "本年使用（分）", "本年分（日）", "在職期間の始め", "在職期間の終わり", "在職期間の区分"],
-       [16, 8, 4, 4, 4, 10, 4, 16, 8, 10, 10, 10, 4, 22, 10, 10, 12, 12, 10],
+                "年休キー（ID|年）", "前年の行", "繰越分（分）", "合計（分）", "翌年繰越（分）", "", "",
+                "本年使用（分）", "本年分（日）", "在職期間の始め", "在職期間の終わり", "在職期間の区分",
+                "申請用紙の年休（分）", "病気休暇の行", "看護休暇の行"],
+       [16, 8, 4, 4, 4, 10, 4, 16, 8, 10, 10, 10, 4, 4, 10, 10, 12, 12, 10, 12, 10, 10],
        fill=PatternFill("solid", fgColor="7F7F7F"))
 for r in range(2, NAME_LAST + 1):
     ws[f"A{r}"] = "=" + key(name_col("A"))
     ws[f"B{r}"] = f'=IF(A{r}="","",IF(COUNTIF($A$2:$A${NAME_LAST},A{r})>1,"重複",""))'
     ws[f"F{r}"] = f'=IF(A{r}="","",COUNTIF($A$2:A{r},"?*"))'
-# 年次休暇シートの各行（同じ行番号）について、繰越分・合計・翌年繰越を「分」で計算する（1日＝7時間45分＝465分）。
+# 休暇等シートの各行（同じ行番号）について、繰越分・合計・翌年繰越を「分」で計算する（1日＝7時間45分＝465分）。
+# 休暇等シートの列：A 出勤用ID, B 年, C 本年分, D 繰越分（活用開始時）, E 採用日, F 退職日, G・H 本年使用の調整（日・時間）
 # 繰越分 = 前年の行の翌年繰越（前年の行がなければ、その行に手入力した繰越分）
 # 合計 = 繰越分＋本年分（上限40日）
 # 翌年繰越 = 残り（合計−本年使用）の1日未満を切り捨てた日数。上限20日（繰越分と本年分は区別しない）
@@ -213,7 +213,7 @@ for r in range(2, LEAVE_LAST + 1):
     ws[f"H{r}"] = f'=IF(OR({key(leave_col("A"))}="",{leave_col("B")}=""),"",{key(leave_col("A"))}&"|"&{leave_col("B")})'
     ws[f"I{r}"] = f'=IF(H{r}="","",IFERROR(MATCH({key(leave_col("A"))}&"|"&({leave_col("B")}-1),$H$2:$H${LEAVE_LAST},0),""))'
     y = leave_col("B")
-    hire, leave = leave_col("G"), leave_col("H")
+    hire, leave = leave_col("E"), leave_col("F")
     ws[f"Q{r}"] = f'=IF(H{r}="","",IF({hire}="",DATE({y},1,1),MAX(DATE({y},1,1),{hire})))'
     ws[f"R{r}"] = f'=IF(H{r}="","",IF({leave}="",DATE({y},12,31),MIN(DATE({y},12,31),{leave})))'
     ws[f"S{r}"] = (f'=IF(H{r}="","",IF(R{r}<Q{r},-1,DATEDIF(Q{r},R{r}+1,"m")'
@@ -221,20 +221,18 @@ for r in range(2, LEAVE_LAST + 1):
     ws[f"P{r}"] = (f'=IF(H{r}="","",IF({leave_col("C")}&""<>"",N({leave_col("C")}),'
                    f'IF(AND({hire}="",{leave}=""),{GRANT_DEFAULT},'
                    f'IF(S{r}<0,0,CHOOSE(MIN(S{r},11)+1,{",".join(str(d) for d in PRORATED)})))))')
-    # 本年使用（分）＝ 年次休暇シートの調整（手入力）＋ 申請用紙の承認済みの年次休暇と導入前の使用（自動）
-    auto_row = auto_match(f"H{r}", "A")
-    ws[f"O{r}"] = (f'=IF(H{r}="","",ROUND(N({leave_col("D")})*{DAY_MIN}+N({leave_col("E")})*1440,0)'
-                   f'+IFERROR(INDEX({auto_col("B")},{auto_row}),0))')
+    # 申請用紙の承認済みの年次休暇と導入前の使用（分）、病気休暇・看護休暇の月別_自動の行
+    ws[f"T{r}"] = f'=IF(H{r}="","",IFERROR(INDEX({auto_col("B")},{auto_match(f"H{r}", "A")}),0))'
+    ws[f"U{r}"] = f'=IF(H{r}="","",{auto_match(f"H{r}&" + chr(34) + "|病気休暇" + chr(34), "D")})'
+    ws[f"V{r}"] = f'=IF(H{r}="","",{auto_match(f"H{r}&" + chr(34) + "|看護休暇" + chr(34), "D")})'
+    # 本年使用（分）＝ 休暇等シートの調整（手入力）＋ 申請用紙の分
+    ws[f"O{r}"] = f'=IF(H{r}="","",ROUND(N({leave_col("G")})*{DAY_MIN}+N({leave_col("H")})*1440,0)+T{r})'
     # 活用開始時に手入力する繰越分も、繰越のルールどおり1日未満は切り捨て・上限20日
     ws[f"J{r}"] = (f'=IF(H{r}="","",IF(I{r}<>"",INDEX($L$2:$L${LEAVE_LAST},I{r}),'
-                   f'MIN({CARRY_MAX},INT(N({leave_col("F")})))*{DAY_MIN}))')
+                   f'MIN({CARRY_MAX},INT(N({leave_col("D")})))*{DAY_MIN}))')
     ws[f"K{r}"] = f'=IF(H{r}="","",MIN({TOTAL_MAX * DAY_MIN},J{r}+P{r}*{DAY_MIN}))'
     ws[f"L{r}"] = (f'=IF(H{r}="","",MIN({CARRY_MAX * DAY_MIN},'
                    f'INT(MAX(0,K{r}-O{r})/{DAY_MIN})*{DAY_MIN}))')
-for r in range(2, MH_LAST + 1):
-    mid = f"INDEX({MH}!$A:$A,ROW())"
-    ws[f"N{r}"] = (f'=IF(OR({key(mid)}="",INDEX({MH}!$B:$B,ROW())="",INDEX({MH}!$C:$C,ROW())=""),"",'
-                   f'{key(mid)}&"|"&INDEX({MH}!$B:$B,ROW())&"|"&TRIM(INDEX({MH}!$C:$C,ROW())))')
 ws.sheet_state = "hidden"
 
 # ===== 照合結果 =====
@@ -420,8 +418,7 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
     ws.row_dimensions[t].height = 32
 
     # 2〜7行目：左に所属（空欄）とその下に氏名、右に各月の取得時間と累計（病気休暇・看護休暇 × 1月〜12月）
-    # 取得時間は 月別取得時間シート（調整）のその年・区分の行（AC{t+4}〜AC{t+5}=その行の位置）と、
-    # 申請用紙の読み込みシートの月別_自動の行（AC{t+6}〜AC{t+7}）を足して表示する
+    # 取得時間は 申請用紙の読み込みシートの月別_自動の、その年・区分の行（AC{t+4}〜AC{t+5}=その行番号）から表示する
     value_font = Font(name=FONT, size=11, bold=True)
     box(ws, f"A{t + 1}", f"B{t + 3}", "所属")
     box(ws, f"C{t + 1}", f"K{t + 3}", None, value_font, fill_white, left)
@@ -441,26 +438,20 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
     for j, cat in enumerate(HOUR_CATS):
         r = t + 3 + j * 2                       # その月の取得時間
         rc = r + 1                              # 1月からその月までの累計
-        MR = f"${HID}${t + 4 + j}"
-        AR = f"${HID}${t + 6 + j}"
-        ws[f"{HID}{t + 4 + j}"] = (f'=IF(OR({P1}="",{P3}=""),"",'
-                                   f'IFERROR(MATCH({P1}&"|"&YEAR({P3})&"|{cat}",{K}!$N$2:$N${MH_LAST},0),""))')
+        AR = f"${HID}${t + 4 + j}"
         month_key = P1 + '&"|"&YEAR(' + P3 + ')&"|' + cat + '"'
-        ws[f"{HID}{t + 6 + j}"] = f'=IF(OR({P1}="",{P3}=""),"",{auto_match(month_key, "D")})'
+        ws[f"{HID}{t + 4 + j}"] = f'=IF(OR({P1}="",{P3}=""),"",{auto_match(month_key, "D")})'
         box(ws, f"M{r}", f"N{r}", cat, small_label)
         box(ws, f"M{rc}", f"N{rc}", "（累計）", small_label)
-        first_m = f"INDEX({MH}!$D$2:$D${MH_LAST},{MR})"
         first_a = f"INDEX({auto_col('E')},{AR})"
         for i, col in enumerate(SUB[12:]):
-            mcol = get_column_letter(4 + i)     # 月別取得時間シートの i+1 月の列（D〜O）
             acol = get_column_letter(5 + i)     # 月別_自動の i+1 月の列（E〜P）
-            v = f"INDEX({MH}!${mcol}$2:${mcol}${MH_LAST},{MR})"
             a = f"INDEX({auto_col(acol)},{AR})"
-            month = f'(IF({MR}="",0,N({v}))+IF({AR}="",0,N({a})))'
+            month = f'IF({AR}="",0,N({a}))'
             box(ws, f"{col}{r}", f"{col}{r}", f'=IF(OR({P1}="",{P3}=""),"",IF({month}=0,"",{month}))',
                 hour_font, fill_white)
             # 累計は対象年月の月まで表示（それより後の月と、累計が0の月は空欄）
-            total = f'(IF({MR}="",0,SUM({first_m}:{v}))+IF({AR}="",0,SUM({first_a}:{a})))'
+            total = f'IF({AR}="",0,SUM({first_a}:{a}))'
             box(ws, f"{col}{rc}", f"{col}{rc}",
                 f'=IF(OR({P1}="",{P3}=""),"",IF({i + 1}>MONTH({P3}),"",IF({total}=0,"",{total})))',
                 hour_font, fill_white)
@@ -469,7 +460,7 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
         ws.row_dimensions[r].height = 18
     ws.row_dimensions[t + 7].height = 8
 
-    # 9〜10行目：年次休暇の取得日数（年次休暇シートのその年の行から表示。AC{t+3}=その行の位置）
+    # 9〜10行目：年次休暇の取得日数（休暇等シートのその年の行から表示。AC{t+3}=その行の位置）
     r = t + 8
     LR = f"${HID}${t + 3}"
     ws[f"{HID}{t + 3}"] = (f'=IF(OR({P1}="",{P3}=""),"",'
@@ -520,9 +511,11 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
         ws[f"{HID_COUNT}{r}"] = f'=IF(A{r}="","",COUNTIFS({rng_key},{P1},{rng_day},TEXT(A{r},"yyyy-mm-dd")))'
         for k in range(len(TABLE)):
             cells = span_cells(ws, r, k)
-            if k == 0:      # 出勤の○は2本の真ん中に（「選択範囲内で中央」は両方のセルに指定が必要）
-                for c in cells:
+            if k <= 8:      # 出勤の○と、申請用紙から入る欄（年次休暇〜職専免（時間））は2本の真ん中に
+                for c in cells:   # 「選択範囲内で中央」は両方のセルに指定が必要
                     c.alignment = Alignment(horizontal="centerContinuous", vertical="center")
+                    if k:
+                        c.font = Font(name=FONT, size=9)
             else:
                 cells[0].alignment = left
         ws[f"C{r}"] = f'=IF(N({HID_COUNT}{r})=0,"","○")'
@@ -642,80 +635,82 @@ ws["D2"] = "（予定）と書いた2027年の春分の日・秋分の日は、�
 ws["D2"].font = f_note
 ws.freeze_panes = "A2"
 
-# ===== 年次休暇（職員ごと・年ごとに1行。入力欄と、自動計算の表示） =====
-ws = wb.create_sheet("年次休暇")
-header(ws, 1, ["出勤用ID", "年（西暦）", "本年分（日）\n空欄は自動", "本年使用の\n調整（日）", "本年使用の\n調整（時間）",
-               "繰越分（日）\n活用開始時のみ", "採用日\n（年の途中のみ）", "退職日\n（年の途中のみ）", "備考",
-               "本年分\n（自動）", "繰越分\n（自動）", "合計\n（自動）", "翌年繰越\n（自動）"],
-       [12, 10, 11, 9, 9, 13, 12, 12, 20, 9, 15, 15, 15])
+# ===== 休暇等（職員ごと・年ごとに1行。年次休暇の入力欄と、申請用紙から読んだ値・自動計算の表示） =====
+ws = wb.create_sheet("休暇等")
+INPUTS = [("出勤用ID", 12), ("年（西暦）", 9), ("本年分（日）\n空欄は自動", 11), ("繰越分（日）\n活用開始時のみ", 13),
+          ("採用日\n（年の途中のみ）", 12), ("退職日\n（年の途中のみ）", 12),
+          ("本年使用の\n調整（日）", 10), ("本年使用の\n調整（時間）", 10)]                      # A〜H
+AUTOS = [("本年分\n（自動）", 9), ("繰越分\n（自動）", 13), ("合計\n（自動）", 13),
+         ("本年使用\n（申請用紙）", 13), ("本年使用\n（合計）", 13), ("残り\n（自動）", 13),
+         ("翌年繰越\n（自動）", 13)]                                                              # I〜O
+MONTH_COLS = {cat: [get_column_letter(16 + j * 12 + i) for i in range(12)] for j, cat in enumerate(HOUR_CATS)}
+NOTE_COL = get_column_letter(16 + 24)                                                             # AN 備考
+labels = [x for x, _ in INPUTS + AUTOS]
+widths = [w for _, w in INPUTS + AUTOS]
+for cat in HOUR_CATS:
+    labels += [f"{cat[:2]}\n{i + 1}月" for i in range(12)]
+    widths += [6] * 12
+labels.append("備考")
+widths.append(24)
+header(ws, 1, labels, widths)
 ws.row_dimensions[1].height = 32
 for c in ws[1]:
     c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-style_range(ws, 2, LEAVE_LAST, 1, 9, fill=fill_input, align=center)
+fill_month = PatternFill("solid", fgColor="5B4A7A")      # 病気休暇・看護休暇の見出しは色を変えて区切る
+for cols in MONTH_COLS.values():
+    for col in cols:
+        ws[f"{col}1"].fill = fill_month
+last_month = MONTH_COLS[HOUR_CATS[-1]][-1]
+style_range(ws, 2, LEAVE_LAST, 1, 8, fill=fill_input, align=center)
 style_range(ws, 2, LEAVE_LAST, 1, 1, fmt="@", align=center)
-style_range(ws, 2, LEAVE_LAST, 5, 5, fill=fill_input, fmt="[h]:mm", align=center)   # 時間は「時間:分」（例 2:15）
-style_range(ws, 2, LEAVE_LAST, 7, 8, fill=fill_input, fmt="yyyy/m/d", align=center)
-style_range(ws, 2, LEAVE_LAST, 10, 14, fill=fill_calc, align=center)
-c = ws.cell(row=1, column=14, value="本年使用\n（自動・合計）")
-c.font, c.fill, c.alignment, c.border = f_head, fill_head, center, border
-ws.column_dimensions["N"].width = 15
+style_range(ws, 2, LEAVE_LAST, 5, 6, fill=fill_input, fmt="yyyy/m/d", align=center)
+style_range(ws, 2, LEAVE_LAST, 8, 8, fill=fill_input, fmt="[h]:mm", align=center)   # 時間は「時間:分」（例 2:15）
+style_range(ws, 2, LEAVE_LAST, 9, 15, fill=fill_calc, align=center)
+style_range(ws, 2, LEAVE_LAST, 16, 39, fill=fill_calc, fmt="[h]:mm", align=center)
+style_range(ws, 2, LEAVE_LAST, 40, 40, fill=fill_input)
+row_key = f"INDEX({K}!$H:$H,ROW())"
+
+
+def calc(col):
+    return f"INDEX({K}!${col}:${col},ROW())"
+
+
 for r in range(2, LEAVE_LAST + 1):
-    ws[f"I{r}"].alignment = left
-    ws[f"N{r}"] = f'=IF(INDEX({K}!$H:$H,ROW())="","",{days_text(f"INDEX({K}!$O:$O,ROW())")})'
-    ws[f"J{r}"] = f'=IF(INDEX({K}!$H:$H,ROW())="","",INDEX({K}!$P:$P,ROW())&"日")'
-    for col, src in (("K", "J"), ("L", "K"), ("M", "L")):
-        ws[f"{col}{r}"] = f'=IF(INDEX({K}!$H:$H,ROW())="","",{days_text(f"INDEX({K}!${src}:${src},ROW())")})'
-ws["A2"], ws["B2"], ws["C2"] = "1234", 2026, 20
-ws["F2"], ws["I2"] = 10, "（例）この行は例です。削除してください"
-ws.freeze_panes = "A2"
-ws["P1"] = "使い方"
-ws["P1"].font = f_bold
+    ws[f"{NOTE_COL}{r}"].alignment = left
+    ws[f"I{r}"] = f'=IF({row_key}="","",{calc("P")}&"日")'
+    for col, expr in (("J", calc("J")), ("K", calc("K")), ("L", calc("T")), ("M", calc("O")),
+                      ("N", f'({calc("K")}-{calc("O")})'), ("O", calc("L"))):
+        ws[f"{col}{r}"] = f'=IF({row_key}="","",{days_text(expr)})'
+    # 病気休暇・看護休暇の1月〜12月：申請用紙の読み込みシートの月別_自動の行（計算用 U・V 列）から
+    for cat, idx_col in zip(HOUR_CATS, ("U", "V")):
+        idx = calc(idx_col)
+        for i, col in enumerate(MONTH_COLS[cat]):
+            v = f"INDEX({auto_col(get_column_letter(5 + i))},{idx})"
+            ws[f"{col}{r}"] = f'=IF({idx}="","",IF(N({v})=0,"",{v}))'
+ws["A2"], ws["B2"], ws["C2"], ws["D2"] = "1234", 2026, 20, 10
+ws[f"{NOTE_COL}2"] = "（例）この行は例です。削除してください"
+ws.freeze_panes = "C2"
+note_col = get_column_letter(16 + 24 + 2)    # AP
+ws[f"{note_col}1"] = "使い方"
+ws[f"{note_col}1"].font = f_bold
 for i, text in enumerate([
-    "・職員ごと・年ごとに1行入力します（例：出勤用ID 1234 の2026年分）。",
+    "・職員ごと・年ごとに1行入力します（例：出勤用ID 1234 の2026年分）。黄色の欄が入力欄、灰色の欄は自動です。",
+    "・灰色の欄には計算式が入っています。行を消すときは行ごと削除し（行番号を右クリック →［削除］）、行を選んで Delete キーで消さないでください（計算式が消えます）。",
     f"・本年分（その年に付与された日数）は、通年で勤務する場合は空欄のままで構いません（{GRANT_DEFAULT}日として計算）。",
     "・年の途中で採用・退職した場合は、採用日・退職日を入力すると、在職期間に応じた本年分が自動で入ります（1月に達するまで2日〜11月を超え1年未満20日）。",
     "・本年分を入力した場合は、入力した日数が優先されます。",
-    "・本年使用は、休暇申請用紙の承認済みの年次休暇（と申請用紙の「導入前の使用」）が自動で入ります（N列が合計）。",
-    "・申請用紙に書かれていない使用があるときだけ、D・E列（本年使用の調整）に日数と時間を入力します。申請用紙の分に足されます。普段は空欄です。",
-    "・年次休暇は15分単位で取得できます。時間は「時間:分」で入力します（例：2時間15分 → 2:15）。",
-    f"・1日は7時間45分として計算します。7時間45分以上の時間は自動で日数に繰り上がります。",
     "・繰越分は、前の年の行があれば、その行の「翌年繰越」が自動で入ります。",
-    f"・活用開始時（前の年の行がない年）だけ、F列に繰越分の日数を手入力してください。繰越分は日単位なので、1日未満の端数は切り捨てます（上限{CARRY_MAX}日）。",
-    f"・合計は繰越分＋本年分です（上限{TOTAL_MAX}日）。",
-    f"・翌年繰越は、残り（合計−本年使用）の1日未満の端数を切り捨てた日数です（上限{CARRY_MAX}日）。繰越分と本年分は区別しません。",
-    "・ここで入力した内容は、出勤簿の「年次休暇 取得日数」の欄に表示されます。",
+    f"・活用開始時（前の年の行がない年）だけ、D列に繰越分の日数を手入力してください。繰越分は日単位なので、1日未満の端数は切り捨てます（上限{CARRY_MAX}日）。",
+    "・本年使用（申請用紙）は、休暇申請用紙の承認済みの年次休暇と、申請用紙の「導入前の使用」です（「申請用紙の読み込み」シートの B2 のフォルダから、このファイルを開いたときに読み込みます）。",
+    "・申請用紙に書かれていない年次休暇の使用があるときだけ、G・H列（本年使用の調整）に日数と時間（「時間:分」、例 2:15）を入力します。申請用紙の分に足されます。普段は空欄です。",
+    "・年次休暇は15分単位で、1日は7時間45分として計算します。7時間45分以上の時間は自動で日数に繰り上がります。",
+    f"・合計は繰越分＋本年分です（上限{TOTAL_MAX}日）。残りは 合計−本年使用（合計） です。",
+    f"・翌年繰越は、残りの1日未満の端数を切り捨てた日数です（上限{CARRY_MAX}日）。繰越分と本年分は区別しません。",
+    "・病気休暇・看護休暇の1月〜12月は、休暇申請用紙の承認済みの申請を月ごとに足した時間です（開始日の月。1日単位は1日＝7時間45分）。直したいときは申請用紙を直します。",
+    "・この行の内容は、出勤簿の「年次休暇 取得日数」と「取得時間」の欄に表示されます（取得時間は、この行がなくても申請用紙から表示されます）。",
 ], start=2):
-    ws[f"P{i}"] = text
-    ws[f"P{i}"].font = f_note
-
-# ===== 月別取得時間（職員ごと・年ごと・区分ごとに1行。1月〜12月の取得時間を入力） =====
-ws = wb.create_sheet("月別取得時間")
-header(ws, 1, ["出勤用ID", "年（西暦）", "区分"] + [f"{m}月" for m in range(1, 13)] + ["備考"],
-       [12, 10, 12] + [6] * 12 + [24])
-style_range(ws, 2, MH_LAST, 1, 16, fill=fill_input, align=center)
-style_range(ws, 2, MH_LAST, 1, 1, fmt="@", align=center)
-for r in range(2, MH_LAST + 1):
-    ws[f"P{r}"].alignment = left
-dv_cat = DataValidation(type="list", formula1='"' + ",".join(HOUR_CATS) + '"', allow_blank=True)
-dv_cat.error, dv_cat.errorTitle = "病気休暇・看護休暇から選んでください。", "区分"
-ws.add_data_validation(dv_cat)
-dv_cat.add(f"C2:C{MH_LAST}")
-ws["A2"], ws["B2"], ws["C2"], ws["D2"], ws["P2"] = "1234", 2026, "病気休暇", time(3, 30), "（例）この行は例です。削除してください"
-ws["A3"], ws["B3"], ws["C3"], ws["E3"], ws["P3"] = "1234", 2026, "看護休暇", time(0, 45), "（例）この行は例です。削除してください"
-for ref in ("D2", "E3"):
-    ws[ref].number_format = "[h]:mm"
-ws.freeze_panes = "D2"
-ws["R1"] = "使い方"
-ws["R1"].font = f_bold
-for i, text in enumerate([
-    "・職員ごと・年ごと・区分（病気休暇・看護休暇）ごとに1行入力します。",
-    "・病気休暇・看護休暇は、休暇申請用紙の承認済みの申請が自動で出勤簿に入ります。このシートは、申請用紙に書かれていない分を足す「調整」用です。普段は空欄です。",
-    "・1月〜12月の欄に、その月の取得時間を「時間:分」で入力します（例：3時間30分 → 3:30、45分 → 0:45）。",
-    "・ここで入力した内容は、申請用紙の分に足して、出勤簿の上の欄（取得時間）に表示されます。",
-    "・区分は一覧から選んでください。同じID・年・区分の行が2つあると、上の行が使われます。",
-], start=2):
-    ws[f"R{i}"] = text
-    ws[f"R{i}"].font = f_note
+    ws[f"{note_col}{i}"] = text
+    ws[f"{note_col}{i}"].font = f_note
 
 # ===== 申請用紙の読み込み（休暇申請用紙を Power Query で読んだ表。表は add_queries.ps1 が作る） =====
 ws = wb.create_sheet("申請用紙の読み込み")

@@ -5,7 +5,7 @@ import sys
 import zipfile
 
 SRC, DST = sys.argv[1], sys.argv[2]
-TARGETS = {"職員名簿": "A2:A501", "出力データ貼付": "A2:E5001", "年次休暇": "A2:A1001", "月別取得時間": "A2:A1501"}
+TARGETS = {"職員名簿": "A2:A501", "出力データ貼付": "A2:E5001", "休暇等": "A2:A1001"}
 
 with zipfile.ZipFile(SRC) as z:
     files = {n: z.read(n) for n in z.namelist()}
