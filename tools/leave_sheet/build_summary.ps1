@@ -12,9 +12,7 @@ if ($LASTEXITCODE -ne 0) { throw 'make_summary.py が失敗しました' }
 # 接続のみのクエリ（ほかのクエリから使う）と、シートに出すクエリ
 $helpers = @('申請用紙', '申請データ')
 $loaded = [ordered]@{
-    '申請一覧'           = @{ Time = @('時間'); Date = @('申請日', '開始日', '終了日', '承認日') }
-    '照合用_年次休暇'     = @{ Time = @('本年使用（時間）'); Date = @() }
-    '照合用_月別取得時間' = @{ Time = (1..12 | ForEach-Object { "${_}月" }); Date = @() }
+    '申請一覧' = @{ Time = @('時間'); Date = @('申請日', '開始日', '終了日', '承認日') }
 }
 
 $xl = New-Object -ComObject Excel.Application
