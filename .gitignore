@@ -13,6 +13,8 @@ npm-debug.log
 送信済み.txt
 通知送信ログ.txt
 
-# 休暇申請用紙の引き渡し一式（tools/leave_sheet/make_package.py で作る）
+# 休暇申請の引き渡し一式（tools/leave_sheet/make_package.py で作る）
+休暇申請一式/
+休暇申請一式.zip
 休暇申請用紙一式/
 休暇申請用紙一式.zip

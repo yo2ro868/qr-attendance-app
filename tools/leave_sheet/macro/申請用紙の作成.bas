@@ -3,6 +3,7 @@ Option Explicit
 ' 休暇申請用紙を職員の数だけ作る・全員分を更新する（管理者用。申請用紙の作成.xlsm の「設定」シートのボタンから実行する）。
 ' 照合用Excel の「職員名簿」（出勤用ID・氏名）と「休暇等」シート（年ごとの持ち日数・本年使用の調整）を読み、
 ' 各申請用紙の非表示の「管理」シートに 出勤用ID・氏名・年・持ち日数（分）・本年使用の調整（分）を書き込む。
+' 調整には、休暇等シートの本年使用の調整に、Forms で申請して承認された年次休暇（申請用紙には書かれない分）を足して書く。
 '   ［申請用紙を作成］… 職員名簿の全員について、まだない人の申請用紙をひな形から作る（あれば作らない・上書きしない）
 '   ［申請用紙を更新］… 作成先にある全員の申請用紙の「管理」シートを、休暇等シートの今の値に書き換える
 
@@ -15,6 +16,7 @@ Private staff As Variant      ' 職員名簿 A:B（出勤用ID・氏名）
 Private keys As Variant       ' 計算用 H（出勤用ID|年）
 Private totals As Variant     ' 計算用 K（合計・分）
 Private adjust As Variant     ' 休暇等 G:H（本年使用の調整：日・時間）
+Private formsMin As Variant   ' 計算用 W（Forms で承認された年次休暇・分）
 
 Public Sub CreateLeaveSheets()
     RunAll True, False
@@ -122,6 +124,7 @@ Private Sub ReadMatching(matchPath As String)
     keys = src.Worksheets("計算用").Range("H2:H" & LEAVE_LAST).Value
     totals = src.Worksheets("計算用").Range("K2:K" & LEAVE_LAST).Value
     adjust = src.Worksheets("休暇等").Range("G2:H" & LEAVE_LAST).Value
+    formsMin = src.Worksheets("計算用").Range("W2:W" & LEAVE_LAST).Value
     If openedHere Then src.Close SaveChanges:=False
 End Sub
 
@@ -142,7 +145,7 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     pos = FindRow(NormId(id) & "|" & yr)
     If pos > 0 Then
         If IsNumeric(totals(pos, 1)) And CStr(totals(pos, 1)) <> "" Then hold = totals(pos, 1)
-        adj = Round(Val(adjust(pos, 1)) * DAY_MIN + Val(adjust(pos, 2)) * 1440, 0)
+        adj = Round(Val(adjust(pos, 1)) * DAY_MIN + Val(adjust(pos, 2)) * 1440 + Val(formsMin(pos, 1)), 0)
     End If
     Set wb = Workbooks.Open(Filename:=path, UpdateLinks:=0)
     Set ws = wb.Worksheets("管理")
@@ -155,7 +158,7 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     ws.Range("B6").Value = Now
     wb.Close SaveChanges:=True
     If pos > 0 Then
-        UpdateOne = "更新しました（持ち日数 " & DaysText(hold) & "、調整 " & DaysText(adj) & "）"
+        UpdateOne = "更新しました（持ち日数 " & DaysText(hold) & "、調整（Forms の分を含む） " & DaysText(adj) & "）"
     Else
         UpdateOne = "更新しました（持ち日数は空欄：照合用Excel の休暇等シートに " & yr & " 年の行がありません）"
     End If

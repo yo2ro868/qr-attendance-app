@@ -8,7 +8,7 @@ from datetime import date, time
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.pagebreak import Break
@@ -50,13 +50,20 @@ TOTAL_MAX = 40        # 1年に使える日数（繰越分＋本年分）の上�
 DAY_MIN = 465         # 年次休暇の1日＝7時間45分＝465分（15分単位で取得できる）
 HOL = "'祝日'!$A$2:$A$200"
 HOUR_CATS = ["病気休暇", "看護休暇"]
-# 申請用紙の読み込みシート：休暇申請用紙（tools/leave_sheet）を Power Query で読んだ表を置く（add_queries.ps1 が作る）。
-# 表の見出しは5行目、データは6行目から。3行目に各表の行数（照合を速くするため、その行数の範囲だけを探す。
-# 式は add_queries.ps1 が表を作ってから入れる）。表は読み直すと行が増減して下のセルがずれるので、
-# この表を指す式は列全体（$A:$A）と行番号で書く
+# 申請用紙の読み込みシート：休暇申請用紙（tools/leave_sheet）と Forms の回答を Power Query で読んだ表を置く（add_queries.ps1 が作る）。
+# 2〜4行目が設定（申請用紙のフォルダ、Forms の回答ファイル2つ）。表の見出しは8行目、データは9行目から。
+# 6行目に各表の行数（照合を速くするため、その行数の範囲だけを探す。式は add_queries.ps1 が表を作ってから入れる）。
+# 表は読み直すと行が増減して下のセルがずれるので、この表を指す式は列全体（$A:$A）と行番号で書く
 AU = "'申請用紙の読み込み'"
-AUTO_FIRST = 6
-AUTO_TABLES = {"年休_自動": "A", "月別_自動": "D", "日別_自動": "R"}   # 表の左上の列（キーの列）
+AUTO_COUNT_ROW, AUTO_HEAD = 6, 8
+AUTO_FIRST = AUTO_HEAD + 1
+AU_Y, AU_M, AU_D = "A", "E", "S"     # 年休_自動（キー・分・Forms分）、月別_自動（キー・1〜12月）、日別_自動（キー・8欄）のキーの列
+AUTO_TABLES = {"年休_自動": AU_Y, "月別_自動": AU_M, "日別_自動": AU_D}
+
+
+def col_after(col, n):
+    """col から n 列右の列の文字"""
+    return get_column_letter(column_index_from_string(col) + n)
 
 
 def auto_col(col):
@@ -66,7 +73,7 @@ def auto_col(col):
 def auto_match(key_expr, key_col):
     """申請用紙の読み込みシートのキーの列から key_expr を探した行番号（なければ ""）。"""
     c = auto_col(key_col)
-    return (f'IFERROR(MATCH({key_expr},INDEX({c},{AUTO_FIRST}):INDEX({c},{AUTO_FIRST - 1}+MAX(1,{AU}!${key_col}$3)),0)'
+    return (f'IFERROR(MATCH({key_expr},INDEX({c},{AUTO_FIRST}):INDEX({c},{AUTO_FIRST - 1}+MAX(1,{AU}!${key_col}${AUTO_COUNT_ROW})),0)'
             f'+{AUTO_FIRST - 1},"")')
 
 
@@ -176,10 +183,13 @@ for i, (text, bold) in enumerate(lines, start=3):
 
 # ===== 職員名簿（入力専用） =====
 ws = wb.create_sheet("職員名簿")
-header(ws, 1, ["出勤用ID", "氏名", "備考"], [12, 18, 30])
-style_range(ws, 2, NAME_LAST, 1, 3, fill=fill_input)
+header(ws, 1, ["出勤用ID", "氏名", "メールアドレス", "備考"], [12, 18, 32, 30])
+style_range(ws, 2, NAME_LAST, 1, 4, fill=fill_input)
 style_range(ws, 2, NAME_LAST, 1, 1, fmt="@", align=center)
-ws["A2"], ws["B2"], ws["C2"] = "1234", "（例）田中 太郎", "この行は例です。削除してください"
+ws["A2"], ws["B2"], ws["D2"] = "1234", "（例）田中 太郎", "この行は例です。削除してください"
+ws["F1"] = "メールアドレスは、Forms で休暇を申請するときの組織のアカウント（例 tanaka@...）です。Forms の申請をこの人のものとして読み取ります。"
+ws["F1"].font = f_note
+wb.defined_names["職員名簿表"] = DefinedName("職員名簿表", attr_text=f"{N}!$A$1:$C${NAME_LAST}")
 ws.freeze_panes = "A2"
 
 # ===== 出力データ貼付（入力専用） =====
@@ -197,8 +207,8 @@ ws = wb.create_sheet("計算用")
 header(ws, 1, ["名簿の照合キー", "重複", "", "", "", "名簿の連番", "",
                 "年休キー（ID|年）", "前年の行", "繰越分（分）", "合計（分）", "翌年繰越（分）", "", "",
                 "本年使用（分）", "本年分（日）", "在職期間の始め", "在職期間の終わり", "在職期間の区分",
-                "申請用紙の年休（分）", "病気休暇の行", "看護休暇の行"],
-       [16, 8, 4, 4, 4, 10, 4, 16, 8, 10, 10, 10, 4, 4, 10, 10, 12, 12, 10, 12, 10, 10],
+                "申請の年休（分）", "病気休暇の行", "看護休暇の行", "うち Forms の年休（分）"],
+       [16, 8, 4, 4, 4, 10, 4, 16, 8, 10, 10, 10, 4, 4, 10, 10, 12, 12, 10, 12, 10, 10, 14],
        fill=PatternFill("solid", fgColor="7F7F7F"))
 for r in range(2, NAME_LAST + 1):
     ws[f"A{r}"] = "=" + key(name_col("A"))
@@ -221,10 +231,13 @@ for r in range(2, LEAVE_LAST + 1):
     ws[f"P{r}"] = (f'=IF(H{r}="","",IF({leave_col("C")}&""<>"",N({leave_col("C")}),'
                    f'IF(AND({hire}="",{leave}=""),{GRANT_DEFAULT},'
                    f'IF(S{r}<0,0,CHOOSE(MIN(S{r},11)+1,{",".join(str(d) for d in PRORATED)})))))')
-    # 申請用紙の承認済みの年次休暇と導入前の使用（分）、病気休暇・看護休暇の月別_自動の行
-    ws[f"T{r}"] = f'=IF(H{r}="","",IFERROR(INDEX({auto_col("B")},{auto_match(f"H{r}", "A")}),0))'
-    ws[f"U{r}"] = f'=IF(H{r}="","",{auto_match(f"H{r}&" + chr(34) + "|病気休暇" + chr(34), "D")})'
-    ws[f"V{r}"] = f'=IF(H{r}="","",{auto_match(f"H{r}&" + chr(34) + "|看護休暇" + chr(34), "D")})'
+    # 申請用紙・Forms の承認済みの年次休暇（分）と、そのうち Forms の分（申請用紙の作成.xlsm が申請用紙に書く）、
+    # 病気休暇・看護休暇の月別_自動の行
+    year_row = auto_match(f"H{r}", AU_Y)
+    ws[f"T{r}"] = f'=IF(H{r}="","",IFERROR(INDEX({auto_col(col_after(AU_Y, 1))},{year_row}),0))'
+    ws[f"W{r}"] = f'=IF(H{r}="","",IFERROR(INDEX({auto_col(col_after(AU_Y, 2))},{year_row}),0))'
+    ws[f"U{r}"] = f'=IF(H{r}="","",{auto_match(f"H{r}&" + chr(34) + "|病気休暇" + chr(34), AU_M)})'
+    ws[f"V{r}"] = f'=IF(H{r}="","",{auto_match(f"H{r}&" + chr(34) + "|看護休暇" + chr(34), AU_M)})'
     # 本年使用（分）＝ 休暇等シートの調整（手入力）＋ 申請用紙の分
     ws[f"O{r}"] = f'=IF(H{r}="","",ROUND(N({leave_col("G")})*{DAY_MIN}+N({leave_col("H")})*1440,0)+T{r})'
     # 活用開始時に手入力する繰越分も、繰越のルールどおり1日未満は切り捨て・上限20日
@@ -440,12 +453,12 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
         rc = r + 1                              # 1月からその月までの累計
         AR = f"${HID}${t + 4 + j}"
         month_key = P1 + '&"|"&YEAR(' + P3 + ')&"|' + cat + '"'
-        ws[f"{HID}{t + 4 + j}"] = f'=IF(OR({P1}="",{P3}=""),"",{auto_match(month_key, "D")})'
+        ws[f"{HID}{t + 4 + j}"] = f'=IF(OR({P1}="",{P3}=""),"",{auto_match(month_key, AU_M)})'
         box(ws, f"M{r}", f"N{r}", cat, small_label)
         box(ws, f"M{rc}", f"N{rc}", "（累計）", small_label)
-        first_a = f"INDEX({auto_col('E')},{AR})"
+        first_a = f"INDEX({auto_col(col_after(AU_M, 1))},{AR})"
         for i, col in enumerate(SUB[12:]):
-            acol = get_column_letter(5 + i)     # 月別_自動の i+1 月の列（E〜P）
+            acol = col_after(AU_M, 1 + i)       # 月別_自動の i+1 月の列
             a = f"INDEX({auto_col(acol)},{AR})"
             month = f'IF({AR}="",0,N({a}))'
             box(ws, f"{col}{r}", f"{col}{r}", f'=IF(OR({P1}="",{P3}=""),"",IF({month}=0,"",{month}))',
@@ -521,9 +534,9 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
         ws[f"C{r}"] = f'=IF(N({HID_COUNT}{r})=0,"","○")'
         # 年次休暇〜職専免（時間）の欄（TABLE の 1〜8 番目）は、申請用紙の承認済みの申請から表示する
         day_key = P1 + f'&"|"&TEXT(A{r},"yyyy-mm-dd")'
-        ws[f"{HID_DAY}{r}"] = f'=IF(OR({P1}="",A{r}=""),"",{auto_match(day_key, "R")})'
+        ws[f"{HID_DAY}{r}"] = f'=IF(OR({P1}="",A{r}=""),"",{auto_match(day_key, AU_D)})'
         for k in range(1, 9):
-            acol = get_column_letter(18 + k)    # 日別_自動の列（S〜Z）
+            acol = col_after(AU_D, k)           # 日別_自動の k 番目の欄の列
             ws[f"{SPANS[k][0]}{r}"] = (f'=IF({HID_DAY}{r}="","",INDEX({auto_col(acol)},{HID_DAY}{r})&"")')
         ws.row_dimensions[r].height = 19
     ws[f"A{hr + 32}"] = "※ 出勤欄の○は、出勤管理システムの記録（QRコードの読み取りによる出勤登録）によります。"
@@ -685,7 +698,7 @@ for r in range(2, LEAVE_LAST + 1):
     for cat, idx_col in zip(HOUR_CATS, ("U", "V")):
         idx = calc(idx_col)
         for i, col in enumerate(MONTH_COLS[cat]):
-            v = f"INDEX({auto_col(get_column_letter(5 + i))},{idx})"
+            v = f"INDEX({auto_col(col_after(AU_M, 1 + i))},{idx})"
             ws[f"{col}{r}"] = f'=IF({idx}="","",IF(N({v})=0,"",{v}))'
 ws["A2"], ws["B2"], ws["C2"], ws["D2"] = "1234", 2026, 20, 10
 ws[f"{NOTE_COL}2"] = "（例）この行は例です。削除してください"
@@ -714,26 +727,39 @@ for i, text in enumerate([
 
 # ===== 申請用紙の読み込み（休暇申請用紙を Power Query で読んだ表。表は add_queries.ps1 が作る） =====
 ws = wb.create_sheet("申請用紙の読み込み")
-ws["A1"] = "休暇申請用紙の読み込み"
+ws["A1"] = "休暇の申請の読み込み"
 ws["A1"].font = f_title
-ws["A2"] = "申請用紙のフォルダ"
-ws["A2"].font = f_bold
-ws["B2"].fill = fill_input
-ws["B2"].border = border
-ws.merge_cells("B2:J2")
-ws["L2"] = ("← 休暇申請用紙（休暇申請_出勤用ID_氏名.xlsx）を置いた OneDrive の同期フォルダの場所。"
-            "このファイルを開いたときに読み込みます（最新にするときは［データ］→［すべて更新］）。")
-ws["L2"].font = f_note
-ws["A4"], ws["D4"], ws["R4"] = "年次休暇（出勤用ID|年 ごとの使用・分）", "病気休暇・看護休暇（月ごと）", "出勤簿の日ごとの欄"
-for col in AUTO_TABLES.values():
-    ws[f"{col}4"].font = f_bold
-    # 3行目：表の行数（出勤簿などがこの行数の範囲だけを探す。式は add_queries.ps1 が入れる）
-    ws[f"{col}3"].font = f_note
-    ws[f"{col}3"].number_format = '"（"0"行）"'
-ws.column_dimensions["A"].width = 16
-ws.column_dimensions["D"].width = 22
-ws.column_dimensions["R"].width = 18
+for r, (label, note) in enumerate([
+    ("申請用紙のフォルダ", "← 休暇申請用紙（休暇申請_出勤用ID_氏名.xlsx）を置いた OneDrive の同期フォルダの場所（使わなければ空欄）"),
+    ("Forms 申請の回答", "← 休暇申請フォームの回答の Excel ファイルの場所（OneDrive の同期フォルダの中。使わなければ空欄）"),
+    ("Forms 承認の回答", "← 休暇承認フォームの回答の Excel ファイルの場所（同上）"),
+], start=2):
+    ws[f"A{r}"] = label
+    ws[f"A{r}"].font = f_bold
+    ws[f"B{r}"].fill = fill_input
+    ws[f"B{r}"].border = border
+    ws.merge_cells(f"B{r}:J{r}")
+    ws[f"L{r}"] = note
+    ws[f"L{r}"].font = f_note
+ws["L5"] = "このファイルを開いたときに読み込みます（最新にするときは［データ］→［すべて更新］）。6行目は読み込んだ行数です。"
+ws["L5"].font = f_note
+for col, label in zip(AUTO_TABLES.values(), ["年次休暇（出勤用ID|年 ごとの使用・分）", "病気休暇・看護休暇（月ごと）", "出勤簿の日ごとの欄"]):
+    ws[f"{col}{AUTO_HEAD - 1}"] = label
+    ws[f"{col}{AUTO_HEAD - 1}"].font = f_bold
+    # 6行目：表の行数（出勤簿などがこの行数の範囲だけを探す。式は add_queries.ps1 が入れる）
+    ws[f"{col}{AUTO_COUNT_ROW}"].font = f_note
+    ws[f"{col}{AUTO_COUNT_ROW}"].number_format = '"（"0"行）"'
+ws.column_dimensions["A"].width = 18
+ws.column_dimensions[AU_M].width = 22
+ws.column_dimensions[AU_D].width = 18
 wb.defined_names["フォルダ"] = DefinedName("フォルダ", attr_text=f"{AU}!$B$2")
+wb.defined_names["Forms申請ファイル"] = DefinedName("Forms申請ファイル", attr_text=f"{AU}!$B$3")
+wb.defined_names["Forms承認ファイル"] = DefinedName("Forms承認ファイル", attr_text=f"{AU}!$B$4")
+
+# ===== 申請一覧（申請用紙と Forms の全員の申請と状況。表は add_queries.ps1 が作る） =====
+ws = wb.create_sheet("申請一覧")
+ws["A1"] = "全員の休暇の申請（申請用紙と Forms）。照合用Excel を開いたとき、または［データ］→［すべて更新］で最新になります。見出しの ▼ で絞り込めます。"
+ws["A1"].font = f_note
 wb.defined_names["祝日一覧"] = DefinedName("祝日一覧", attr_text="'祝日'!$A$2:$A$200")
 
 wb.calculation.calcMode = "auto"

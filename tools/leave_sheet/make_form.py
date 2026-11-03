@@ -94,7 +94,7 @@ ws["D1"].font = f_note
 MG = "'管理'"
 YR, HOLD, ADJ = f"{MG}!$B$3", f"{MG}!$B$4", f"{MG}!$B$5"   # 年、持ち日数（分）、本年使用の調整（分）
 mg = wb.create_sheet("管理")
-for i, label in enumerate(["出勤用ID", "氏名", "年", "持ち日数（分）", "本年使用の調整（分）", "更新日時"], start=1):
+for i, label in enumerate(["出勤用ID", "氏名", "年", "持ち日数（分）", "本年使用の調整と Forms の承認済み（分）", "更新日時"], start=1):
     mg[f"A{i}"] = label
 mg["B1"].number_format = "@"
 mg["C1"] = "このシートは マクロ（申請用紙の作成.xlsm）が書き込みます。手で変えないでください。"
@@ -117,7 +117,7 @@ ws["A6"] = f'=IF({YR}="","年次休暇の残り（管理者が設定すると表
 ws["A6"].font = f_big
 SUMMARY = [
     ("持ち日数", f"=N({HOLD})", days_text("A9")),
-    # 使用済み＝ 照合用Excel の調整（導入前の使用など）＋ この用紙の承認済みの年次休暇
+    # 使用済み＝ 照合用Excel の調整（導入前の使用など）と Forms で承認された分 ＋ この用紙の承認済みの年次休暇
     ("使用済み（承認済み）",
      f'=N({ADJ})+SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"承認")', days_text("B9")),
     ("承認待ち", f'=SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"")', days_text("C9")),
