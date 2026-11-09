@@ -2,11 +2,13 @@
 # 「休暇申請シートの読み込み」シートに 年休_自動・月別_自動・日別_自動 の表を、「申請一覧」シートに申請一覧の表を作る。開いたときに読み直す設定にする。
 # 使い方：add_queries.ps1 -Path 出勤・休暇管理データ.xlsx [-Folder 休暇申請シートのフォルダ] [-FormsRequest 申請の回答.xlsx] [-FormsApproval 承認の回答.xlsx]
 #   -Folder などを付けると、それを読んだ状態で保存する（確認用）。付けなければ設定欄は空欄のまま。
-param([Parameter(Mandatory = $true)][string]$Path, [string]$Folder = '', [string]$FormsRequest = '', [string]$FormsApproval = '')
+#   -TeleworkFolder はテレワーク予定表（tools/telework）のフォルダ。テレワーク一覧シートと、出勤簿の「テレ」に使う。
+param([Parameter(Mandatory = $true)][string]$Path, [string]$Folder = '', [string]$FormsRequest = '', [string]$FormsApproval = '', [string]$TeleworkFolder = '')
 
 $ErrorActionPreference = 'Stop'
 $Path = [IO.Path]::GetFullPath($Path)
 $sheetQueries = Join-Path $PSScriptRoot '..\leave_sheet\queries'   # 休暇申請シートを読むクエリは休暇集計と同じもの
+$teleworkQueries = Join-Path $PSScriptRoot '..\telework\queries'    # テレワーク予定表を読むクエリ
 $queries = Join-Path $PSScriptRoot 'queries'
 # 接続のみのクエリ（ほかのクエリから使う）。名前 → ファイル
 $helpers = [ordered]@{
@@ -19,6 +21,7 @@ $helpers = [ordered]@{
     'Forms承認'      = Join-Path $queries 'Forms承認.pq'
     'Forms申請'      = Join-Path $queries 'Forms申請.pq'
     '申請データ'     = Join-Path $queries '申請データ.pq'
+    'テレワーク予定表' = Join-Path $teleworkQueries 'テレワーク予定表.pq'
 }
 # シートに出す表：シート・置く場所（見出しの行）・行数を書くセル・時間:分／日付の書式を付ける列
 $loaded = [ordered]@{
@@ -26,6 +29,9 @@ $loaded = [ordered]@{
     '月別_自動' = @{ Sheet = '休暇申請シートの読み込み'; At = 'E8'; Count = 'E6'; Time = (1..12 | ForEach-Object { "${_}月" }); Date = @() }
     '日別_自動' = @{ Sheet = '休暇申請シートの読み込み'; At = 'S8'; Count = 'S6'; Time = @(); Date = @() }
     '申請一覧'  = @{ Sheet = '申請一覧'; At = 'A3'; Count = ''; Time = @('時間'); Date = @('申請日', '開始日', '終了日', '承認日') }
+    # テレワーク：一覧は注意の確認用、日別は出勤簿の出勤欄・備考用（一覧を参照するので一覧の後に作る）
+    'テレワーク一覧'  = @{ Sheet = 'テレワーク一覧'; At = 'A5'; Count = ''; Time = @('開始時刻', '終了時刻', '時間'); Date = @('日付') }
+    'テレワーク_日別' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AD8'; Count = 'AD6'; Time = @(); Date = @() }
 }
 $settings = @{ 'B2' = $Folder; 'B3' = $FormsRequest; 'B4' = $FormsApproval }
 
@@ -42,6 +48,8 @@ try {
     }
     $cfg = $wb.Worksheets.Item('休暇申請シートの読み込み')
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = $settings[$k] } }
+    $tw = $wb.Worksheets.Item('テレワーク一覧')
+    if ($TeleworkFolder) { $tw.Range('B2').Value2 = $TeleworkFolder }
     foreach ($name in $loaded.Keys) {
         $spec = $loaded[$name]
         $ws = $wb.Worksheets.Item($spec.Sheet)
@@ -73,6 +81,7 @@ try {
         }
     }
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = '' } }
+    if ($TeleworkFolder) { $tw.Range('B2').Value2 = '' }
     $wb.Save()
     $wb.Close($false)
 } finally {

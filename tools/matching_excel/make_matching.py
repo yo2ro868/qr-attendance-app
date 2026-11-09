@@ -59,7 +59,10 @@ AU = "'休暇申請シートの読み込み'"
 AUTO_COUNT_ROW, AUTO_HEAD = 6, 8
 AUTO_FIRST = AUTO_HEAD + 1
 AU_Y, AU_M, AU_D = "A", "E", "S"     # 年休_自動（キー・分・Forms分）、月別_自動（キー・1〜12月）、日別_自動（キー・8欄）のキーの列
-AUTO_TABLES = {"年休_自動": AU_Y, "月別_自動": AU_M, "日別_自動": AU_D}
+AU_T = "AD"                           # テレワーク_日別（キー・表示・備考）のキーの列
+AUTO_TABLES = {"年休_自動": AU_Y, "月別_自動": AU_M, "日別_自動": AU_D, "テレワーク_日別": AU_T}
+TW = "'テレワーク一覧'"                # テレワーク一覧シート：B2 がテレワーク予定表のフォルダ、表は TW_HEAD 行目から（add_queries.ps1 が作る）
+TW_HEAD = 5
 
 
 def col_after(col, n):
@@ -154,7 +157,7 @@ lines = [
     ("    ※ 上の欄の題名は「令和〇年出勤簿」と自動で表示されます。所属の欄は記入用の空欄です。", False),
     ("    ※ 病気休暇・看護休暇の各月の取得時間は、休暇申請シート（承認済み）から表示されます（「休暇等」シートでも確かめられます）。", False),
     ("    ※ 年次休暇の取得日数は「休暇等」シートの内容が表示されます（本年使用は 休暇申請シートの承認済み＋調整）。", False),
-    ("    ※ 出勤欄の○は自動で表示されます。年次休暇・病気休暇などの欄は、休暇申請シートの承認済みの申請から自動で表示されます（上書きして手で書くこともできます）。欠勤・備考は記入用の空欄です。", False),
+    ("    ※ 出勤欄の○は自動で表示されます。テレワークの予定がある日は「テレ」（出勤登録もあれば「○テレ」）、時間のテレワークは備考に時刻が出ます。年次休暇・病気休暇などの欄は、休暇申請シートの承認済みの申請から自動で表示されます（上書きして手で書くこともできます）。欠勤は記入用の空欄です。", False),
     (f"7. 全員分をまとめて印刷するときは、「一括印刷」シートの AF2 に対象年月を入力し、そのまま印刷（Ctrl+P）します。職員名簿の全員分の出勤簿が1人1枚で印刷されます（{BATCH}人まで）。", False),
     ("", False),
     ("色の意味", True),
@@ -171,6 +174,7 @@ lines = [
     ("・「計算用」シートは非表示にしています。消したり変更したりしないでください。", False),
     ("・休暇申請シート：「休暇申請シートの読み込み」シートの B2 に休暇申請シートのフォルダを入れておくと、このファイルを開いたとき、または［申請を取り込む］ボタン（申請一覧シート・休暇申請シートの読み込みシート）を押したときに、承認済みの申請を読み込みます。開いたときに「外部データ接続が無効」と出たら［コンテンツの有効化］を押してください。", False),
     ("・休暇等シートには、職員ごと・年ごとに1行、本年分などと、休暇申請シートに書かれていない年次休暇の使用があればその調整（日と時間。15分単位、1日＝7時間45分）を入力します。本年使用・病気休暇・看護休暇は休暇申請シートから自動で表示されます。繰越分は前年の翌年繰越が自動で入ります（活用開始時のみ手入力）。翌年に繰り越せるのは本年分の残りだけで（一度繰り越した日数は更に繰り越せない）、上限は20日、1日未満の端数は切り捨てです。", False),
+    ("・テレワーク：「テレワーク一覧」シートの B2 に、所属長のテレワーク予定表（テレワーク予定表　所属名.xlsx）を置いたフォルダを入れておくと、開いたとき（または［申請を取り込む］）に読み込み、出勤簿に「テレ」と出します。全員の予定と注意（名簿にない ID、休暇と重なる日など）はテレワーク一覧シートで確かめます。", False),
     ("・このファイルには氏名が含まれます。クラウドやメールで共有せず、管理者のPC内だけで保管してください。", False),
     ("・各シートの2行目に入っている（例）のデータは、使い始める前に削除してください。", False),
 ]
@@ -374,6 +378,7 @@ SUB_W = 3.8
 KIND_COLS = (3, 7)              # TABLE のうち特別休暇（種別）・職専免（種別）
 HID_COUNT, HID = "AB", "AC"     # 隠し列：AB=その日の登録件数、AC=照合キー・名簿の行位置・対象月の1日
 HID_DAY = "AD"                  # 隠し列：その日の申請（日別_自動）の行位置
+HID_TELE = "AA"                 # 隠し列：その日のテレワークの予定（テレワーク_日別）の行位置
 MIN_FIRST_COL = 34              # 隠し列 AH〜AS：出勤簿の上の欄の各月・累計の分
 CTRL_L, CTRL_V = "AE", "AF"     # 印刷範囲の外：対象年月・出勤用ID などの指定欄
 wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -386,8 +391,7 @@ def setup_report_sheet(ws):
     ws.column_dimensions["B"].width = 4.5
     for col in SUB:
         ws.column_dimensions[col].width = SUB_W
-    ws.column_dimensions["AA"].width = 2
-    for col in [HID_COUNT, HID, HID_DAY] + [get_column_letter(MIN_FIRST_COL + i) for i in range(12)]:
+    for col in [HID_TELE, HID_COUNT, HID, HID_DAY] + [get_column_letter(MIN_FIRST_COL + i) for i in range(12)]:
         ws.column_dimensions[col].width = 8
         ws.column_dimensions[col].hidden = True
     ws.column_dimensions[CTRL_L].width = 12
@@ -556,15 +560,21 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
                         c.font = Font(name=FONT, size=9)
             else:
                 cells[0].alignment = left
-        ws[f"C{r}"] = f'=IF(N({HID_COUNT}{r})=0,"","○")'
-        # 年次休暇〜職専免（時間）の欄（TABLE の 1〜8 番目）は、休暇申請シートの承認済みの申請から表示する
         day_key = P1 + f'&"|"&TEXT(A{r},"yyyy-mm-dd")'
+        # 出勤欄：QR の出勤登録があれば「○」、テレワークの予定（テレワーク_日別）があれば「テレ」（両方なら「○テレ」）。
+        # 時間のテレワークは備考に時刻を出す（隠し列 AA がテレワーク_日別の行位置）
+        ws[f"{HID_TELE}{r}"] = f'=IF(OR({P1}="",A{r}=""),"",{auto_match(day_key, AU_T)})'
+        ws[f"C{r}"] = (f'=IF(N({HID_COUNT}{r})=0,"","○")'
+                       f'&IF({HID_TELE}{r}="","",INDEX({auto_col(col_after(AU_T, 1))},{HID_TELE}{r})&"")')
+        ws[f"{SPANS[-1][0]}{r}"] = f'=IF({HID_TELE}{r}="","",INDEX({auto_col(col_after(AU_T, 2))},{HID_TELE}{r})&"")'
+        ws[f"{SPANS[-1][0]}{r}"].font = Font(name=FONT, size=8)
+        # 年次休暇〜職専免（時間）の欄（TABLE の 1〜8 番目）は、休暇申請シートの承認済みの申請から表示する
         ws[f"{HID_DAY}{r}"] = f'=IF(OR({P1}="",A{r}=""),"",{auto_match(day_key, AU_D)})'
         for k in range(1, 9):
             acol = col_after(AU_D, k)           # 日別_自動の k 番目の欄の列
             ws[f"{SPANS[k][0]}{r}"] = (f'=IF({HID_DAY}{r}="","",INDEX({auto_col(acol)},{HID_DAY}{r})&"")')
         ws.row_dimensions[r].height = 19
-    ws[f"A{hr + 32}"] = "※ 出勤欄の○は、出勤管理システムの記録（QRコードの読み取りによる出勤登録）によります。"
+    ws[f"A{hr + 32}"] = "※ 出勤欄の○は出勤管理システムの記録（QRコードの読み取りによる出勤登録）、「テレ」は所属長のテレワーク予定表によります。"
     ws[f"A{hr + 32}"].font = f_note
 
 
@@ -759,7 +769,8 @@ ws["B5"].alignment = left
 ws["L5"] = "開いたとき、または［申請を取り込む］を押したときに読み込みます（数秒かかります）。読むのは保存された内容です。6行目は読み込んだ行数です。"
 ws["L5"].font = f_note
 ws.column_dimensions["B"].width = 16
-for col, label in zip(AUTO_TABLES.values(), ["年次休暇（出勤用ID|年 ごとの使用・分）", "病気休暇・看護休暇（月ごと）", "出勤簿の日ごとの欄"]):
+for col, label in zip(AUTO_TABLES.values(), ["年次休暇（出勤用ID|年 ごとの使用・分）", "病気休暇・看護休暇（月ごと）", "出勤簿の日ごとの欄",
+                                              "テレワーク（出勤簿の出勤欄・備考）"]):
     ws[f"{col}{AUTO_HEAD - 1}"] = label
     ws[f"{col}{AUTO_HEAD - 1}"].font = f_bold
     # 6行目：表の行数（出勤簿などがこの行数の範囲だけを探す。式は add_queries.ps1 が入れる）
@@ -768,6 +779,7 @@ for col, label in zip(AUTO_TABLES.values(), ["年次休暇（出勤用ID|年 ご
 ws.column_dimensions["A"].width = 18
 ws.column_dimensions[AU_M].width = 22
 ws.column_dimensions[AU_D].width = 18
+ws.column_dimensions[AU_T].width = 18
 wb.defined_names["フォルダ"] = DefinedName("フォルダ", attr_text=f"{AU}!$B$2")
 wb.defined_names["Forms申請ファイル"] = DefinedName("Forms申請ファイル", attr_text=f"{AU}!$B$3")
 wb.defined_names["Forms承認ファイル"] = DefinedName("Forms承認ファイル", attr_text=f"{AU}!$B$4")
@@ -777,6 +789,20 @@ ws = wb.create_sheet("申請一覧")
 ws["A1"] = "全員の休暇の申請（休暇申請シートと Forms）。出勤・休暇管理データ を開いたとき、または［申請を取り込む］を押すと最新になります。見出しの ▼ で絞り込めます。"
 ws["A1"].font = f_note
 wb.defined_names["祝日一覧"] = DefinedName("祝日一覧", attr_text="'祝日'!$A$2:$A$200")
+
+# ===== テレワーク一覧（所属長のテレワーク予定表を読んだ全員の予定と注意。表は add_queries.ps1 が作る） =====
+ws = wb.create_sheet("テレワーク一覧")
+ws["A1"] = "全所属のテレワークの予定（所属長のテレワーク予定表）。開いたとき、または［申請を取り込む］を押すと最新になります。「注意」の列に確かめることが出ます。"
+ws["A1"].font = f_note
+ws["A2"] = "テレワーク予定表のフォルダ"
+ws["A2"].font = f_bold
+ws["B2"].fill = fill_input
+ws["B2"].border = border
+ws.merge_cells("B2:H2")
+ws["J2"] = "← テレワーク予定表（テレワーク予定表　所属名.xlsx）を置いた OneDrive の同期フォルダの場所（使わなければ空欄）"
+ws["J2"].font = f_note
+ws.column_dimensions["A"].width = 22
+wb.defined_names["テレワークフォルダ"] = DefinedName("テレワークフォルダ", attr_text=f"{TW}!$B$2")
 
 wb.calculation.calcMode = "auto"
 wb.calculation.fullCalcOnLoad = True

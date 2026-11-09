@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>テレワーク予定表の手順書</title>
+<style>
+body { font-family: "Meiryo", "Hiragino Sans", sans-serif; max-width: 860px; margin: 32px auto; padding: 0 16px; line-height: 1.7; color: #222; }
+h1 { color: #1e3a5f; border-bottom: 3px solid #1e3a5f; padding-bottom: 6px; }
+h2 { color: #1e3a5f; margin-top: 2em; border-left: 6px solid #1e3a5f; padding-left: 10px; }
+code { background: #f2f2f2; padding: 1px 5px; border-radius: 3px; }
+.note { background: #fff8e1; border: 1px solid #f0d78c; padding: 10px 14px; border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #bbb; padding: 6px 8px; text-align: left; vertical-align: top; }
+th { background: #e8eef5; }
+</style>
+</head>
+<body>
+<h1>テレワーク予定表の手順書</h1>
+<p>所属長が、配属の職員のテレワークの予定を管理者に知らせるための Excel です。<strong>承認はありません。</strong>
+職員から所属長への利用の申し出は、これまでどおり口頭やメールで行います。</p>
+
+<h2>1. 準備（管理者）</h2>
+<ol>
+<li>OneDrive に「テレワーク予定表」フォルダを作ります（休暇申請シートのフォルダとは別にします）。</li>
+<li><code>テレワーク予定表（ひな形）.xlsx</code> を所属の数だけコピーし、名前を <code>テレワーク予定表　所属名.xlsx</code> にします（「テレワーク予定表」と所属名の間は<strong>全角スペース</strong>）。例：<code>テレワーク予定表　総務課.xlsx</code></li>
+<li>それぞれのファイルを、その所属の所属長にだけ共有します（［共有］→「特定のユーザー」→ 所属長 → 編集可能）。</li>
+<li>フォルダを右クリック →［このデバイス上に常に保持する］にして、パソコンに同期しておきます。</li>
+<li>出勤・休暇管理データ の「テレワーク一覧」シートの <strong>B2</strong> に、同期したフォルダの場所を入れます（エクスプローラーでフォルダを右クリック →［パスのコピー］→ 貼り付け）。</li>
+</ol>
+
+<h2>2. 所属長の書き方</h2>
+<table>
+<tr><th>欄</th><th>書くこと</th></tr>
+<tr><td>出勤用ID</td><td>職員の出勤用ID</td></tr>
+<tr><td>氏名（確認用）</td><td>確認のための氏名（書かなくてもかまいません。システムは出勤用ID で照合します）</td></tr>
+<tr><td>日付</td><td>テレワークの日（土日・祝日・年末年始は書けません）</td></tr>
+<tr><td>区分</td><td>1日ずっとなら「終日」、一部の時間だけなら「時間」</td></tr>
+<tr><td>開始時刻・終了時刻</td><td>区分が「時間」のときだけ（15分おきの一覧から選ぶか、直接書く）</td></tr>
+<tr><td>時間</td><td>自動で入ります（12:00〜13:00の休憩を除く）</td></tr>
+<tr><td>備考</td><td>必要なら</td></tr>
+</table>
+<ul>
+<li>1人1日1行です。順番は自由です。予定が変わったら、その行を直すか消します。</li>
+<li>足りない欄や誤りのある欄は<strong>赤く</strong>なり、理由が「確認」の欄に出ます。</li>
+<li>書き終えたら、そのまま閉じてください（Web の Excel なら自動で保存されます）。</li>
+</ul>
+
+<h2>3. 管理者の確認</h2>
+<ul>
+<li>出勤・休暇管理データ を開くと（または［申請を取り込む］を押すと）、予定表を読み込みます。</li>
+<li><strong>出勤簿</strong>：テレワークの日は出勤欄に「テレ」、QR の出勤登録もある日は「○テレ」と出ます。時間のテレワークは備考に「テレ13:00〜17:00」のように時刻が出ます。</li>
+<li><strong>テレワーク一覧</strong>シート：全所属の予定と「注意」（職員名簿にない出勤用ID、土日・祝日、同じ日の重複、同じ日に承認済みの休暇がある、読み取れないファイル など）を確かめます。</li>
+</ul>
+<p class="note">読み込むのは<strong>保存された内容</strong>です。所属長が書いている途中のものは、保存（同期）されてから反映されます。</p>
+</body>
+</html>
