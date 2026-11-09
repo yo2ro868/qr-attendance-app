@@ -1,16 +1,20 @@
-﻿# 照合用Excel に Power Query を入れる：休暇申請用紙（tools/leave_sheet）のフォルダと、Forms の休暇申請・休暇承認の回答の Excel を読み、
-# 「申請用紙の読み込み」シートに 年休_自動・月別_自動・日別_自動 の表を、「申請一覧」シートに申請一覧の表を作る。開いたときに読み直す設定にする。
-# 使い方：add_queries.ps1 -Path 照合用Excel.xlsx [-Folder 申請用紙のフォルダ] [-FormsRequest 申請の回答.xlsx] [-FormsApproval 承認の回答.xlsx]
+﻿# 出勤・休暇管理データ に Power Query を入れる：休暇申請シート（tools/leave_sheet）のフォルダと、Forms の休暇申請・休暇承認の回答の Excel を読み、
+# 「休暇申請シートの読み込み」シートに 年休_自動・月別_自動・日別_自動 の表を、「申請一覧」シートに申請一覧の表を作る。開いたときに読み直す設定にする。
+# 使い方：add_queries.ps1 -Path 出勤・休暇管理データ.xlsx [-Folder 休暇申請シートのフォルダ] [-FormsRequest 申請の回答.xlsx] [-FormsApproval 承認の回答.xlsx]
 #   -Folder などを付けると、それを読んだ状態で保存する（確認用）。付けなければ設定欄は空欄のまま。
 param([Parameter(Mandatory = $true)][string]$Path, [string]$Folder = '', [string]$FormsRequest = '', [string]$FormsApproval = '')
 
 $ErrorActionPreference = 'Stop'
 $Path = [IO.Path]::GetFullPath($Path)
-$sheetQueries = Join-Path $PSScriptRoot '..\leave_sheet\queries'   # 申請用紙を読むクエリは休暇集計と同じもの
+$sheetQueries = Join-Path $PSScriptRoot '..\leave_sheet\queries'   # 休暇申請シートを読むクエリは休暇集計と同じもの
 $queries = Join-Path $PSScriptRoot 'queries'
 # 接続のみのクエリ（ほかのクエリから使う）。名前 → ファイル
 $helpers = [ordered]@{
-    '申請用紙'       = Join-Path $sheetQueries '申請用紙.pq'
+    '休暇申請シート'       = Join-Path $sheetQueries '休暇申請シート.pq'
+    '祝日の日付'     = Join-Path $queries '祝日の日付.pq'
+    '職員名簿_メール' = Join-Path $queries '職員名簿_メール.pq'
+    'Forms回答_申請' = Join-Path $queries 'Forms回答_申請.pq'
+    'Forms回答_承認' = Join-Path $queries 'Forms回答_承認.pq'
     '申請データ_用紙' = Join-Path $sheetQueries '申請データ.pq'
     'Forms承認'      = Join-Path $queries 'Forms承認.pq'
     'Forms申請'      = Join-Path $queries 'Forms申請.pq'
@@ -18,9 +22,9 @@ $helpers = [ordered]@{
 }
 # シートに出す表：シート・置く場所（見出しの行）・行数を書くセル・時間:分／日付の書式を付ける列
 $loaded = [ordered]@{
-    '年休_自動' = @{ Sheet = '申請用紙の読み込み'; At = 'A8'; Count = 'A6'; Time = @(); Date = @() }
-    '月別_自動' = @{ Sheet = '申請用紙の読み込み'; At = 'E8'; Count = 'E6'; Time = (1..12 | ForEach-Object { "${_}月" }); Date = @() }
-    '日別_自動' = @{ Sheet = '申請用紙の読み込み'; At = 'S8'; Count = 'S6'; Time = @(); Date = @() }
+    '年休_自動' = @{ Sheet = '休暇申請シートの読み込み'; At = 'A8'; Count = 'A6'; Time = @(); Date = @() }
+    '月別_自動' = @{ Sheet = '休暇申請シートの読み込み'; At = 'E8'; Count = 'E6'; Time = (1..12 | ForEach-Object { "${_}月" }); Date = @() }
+    '日別_自動' = @{ Sheet = '休暇申請シートの読み込み'; At = 'S8'; Count = 'S6'; Time = @(); Date = @() }
     '申請一覧'  = @{ Sheet = '申請一覧'; At = 'A3'; Count = ''; Time = @('時間'); Date = @('申請日', '開始日', '終了日', '承認日') }
 }
 $settings = @{ 'B2' = $Folder; 'B3' = $FormsRequest; 'B4' = $FormsApproval }
@@ -29,15 +33,14 @@ $xl = New-Object -ComObject Excel.Application
 $xl.DisplayAlerts = $false
 try {
     $wb = $xl.Workbooks.Open($Path)
-    # 設定の値（フォルダ・ファイル・祝日・職員名簿）と申請を組み合わせるので、プライバシー レベルの確認を省く
-    $wb.Queries.FastCombine = $true
+    # プライバシー レベルを無視する設定（FastCombine）はほかのPCに引き継がれないので使わない。クエリの作りで止まらないようにしてある
     foreach ($name in $helpers.Keys) {
         [void]$wb.Queries.Add($name, [IO.File]::ReadAllText($helpers[$name], [Text.Encoding]::UTF8))
     }
     foreach ($name in $loaded.Keys) {
         [void]$wb.Queries.Add($name, [IO.File]::ReadAllText((Join-Path $queries "$name.pq"), [Text.Encoding]::UTF8))
     }
-    $cfg = $wb.Worksheets.Item('申請用紙の読み込み')
+    $cfg = $wb.Worksheets.Item('休暇申請シートの読み込み')
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = $settings[$k] } }
     foreach ($name in $loaded.Keys) {
         $spec = $loaded[$name]
@@ -53,7 +56,7 @@ try {
         $qt.PreserveFormatting = $true
         $qt.AdjustColumnWidth = ($name -eq '申請一覧')
         $qt.Refresh($false) | Out-Null
-        # 照合用Excel を開いたときに読み直す
+        # 出勤・休暇管理データ を開いたときに読み直す
         $lo.QueryTable.WorkbookConnection.OLEDBConnection.RefreshOnFileOpen = $true
         # 行数（出勤簿などがこの範囲だけを探す）。表の名前で書くので、読み直して行が増減しても合う
         if ($spec.Count) {

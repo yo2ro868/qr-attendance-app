@@ -10,7 +10,7 @@ python (Join-Path $PSScriptRoot 'make_summary.py') $raw | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'make_summary.py が失敗しました' }
 
 # 接続のみのクエリ（ほかのクエリから使う）と、シートに出すクエリ
-$helpers = @('申請用紙', '申請データ')
+$helpers = @('休暇申請シート', '申請データ')
 $loaded = [ordered]@{
     '申請一覧' = @{ Time = @('時間'); Date = @('申請日', '開始日', '終了日', '承認日') }
 }
@@ -19,8 +19,7 @@ $xl = New-Object -ComObject Excel.Application
 $xl.DisplayAlerts = $false
 try {
     $wb = $xl.Workbooks.Open($raw)
-    # 設定シートの値（フォルダ）と申請用紙を組み合わせるので、プライバシー レベルの確認を省く
-    $wb.Queries.FastCombine = $true
+    # プライバシー レベルを無視する設定（FastCombine）はほかのPCに引き継がれないので使わない。クエリの作りで止まらないようにしてある
     foreach ($name in $helpers + @($loaded.Keys)) {
         $m = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "queries\$name.pq"), [Text.Encoding]::UTF8)
         [void]$wb.Queries.Add($name, $m)

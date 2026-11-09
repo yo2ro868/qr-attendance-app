@@ -2,9 +2,6 @@
 // 1回答1行：キー（出勤用ID|開始日 yyyy-MM-dd|休暇の種類）・結果（承認／却下／取消）・承認日・承認者・コメント・回答の時刻。
 // 同じキーに何度か回答があれば、いちばん新しい回答が使われる（Forms申請 で）。
 let
-    設定値 = (名前 as text) =>
-        let v = try Excel.CurrentWorkbook(){[Name = 名前]}[Content]{0}[Column1] otherwise null
-        in if v = null then "" else Text.Trim(Text.Replace(Text.From(v), """", "")),
     文字 = (v) => if v = null then "" else Text.Trim(Text.From(v)),
     日付 = (v) => if v = null then null
         else if v is date then v
@@ -17,14 +14,6 @@ let
         else try DateTime.From(v) otherwise null,
     正規ID = (id) => let t = Text.Trim(if id = null then "" else Text.From(id))
         in if t = "" then "" else try Text.From(Number.From(t)) otherwise t,
-    // 回答の Excel の最初の表（なければ最初のシートを見出し付きで）
-    回答の表 = (path as text) as table =>
-        let
-            ブック = Excel.Workbook(File.Contents(path), null, true),
-            表 = Table.SelectRows(ブック, each [Kind] = "Table"),
-            シート = Table.SelectRows(ブック, each [Kind] = "Sheet")
-        in
-            if not Table.IsEmpty(表) then 表{0}[Data] else Table.PromoteHeaders(シート{0}[Data], [PromoteAllScalars = true]),
     // 見出しで列を探す（完全一致 → 前方一致）
     列名 = (t as table, 名前 as text) =>
         let
@@ -36,8 +25,7 @@ let
     値 = (r as record, c) => if c = null then null else Record.Field(r, c),
     型 = type table [キー = text, 結果 = text, 承認日 = nullable date, 承認者 = text, コメント = text,
         回答の時刻 = nullable datetime, 出勤用ID = text, 開始日 = nullable date, 休暇の種類 = text],
-    ファイル = 設定値("Forms承認ファイル"),
-    表 = if ファイル = "" then null else try 回答の表(ファイル) otherwise null,
+    表 = Forms回答_承認[表],
     行 = if 表 = null then {} else
         let
             c = [ID = 列名(表, "申請者の出勤用ID"), 開始 = 列名(表, "休暇の開始日"), 種類 = 列名(表, "休暇の種類"),

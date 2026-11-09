@@ -1,7 +1,8 @@
 // 全員の申請を1件1行にする（接続のみ）。日付は date、取得時間は「分」に直す。
-// 分：1日単位は 日数×465（1日＝7時間45分）、時間単位は 時間×1440
+// 分：日単位は 日数×465（1日＝7時間45分）、時間・分単位は 時間×1440
 let
-    数 = (v) => if v = null then 0 else try Number.From(v) otherwise 0,
+    // 式の入った欄が空の文字（""）のとき Number.From は null を返すので、0 にそろえる
+    数 = (v) => let n = try Number.From(v) otherwise 0 in if n = null then 0 else n,
     文字 = (v) => if v = null then "" else Text.Trim(Text.From(v)),
     日付 = (v) => if v = null then null
         else if v is date then v
@@ -22,24 +23,27 @@ let
                     // レコードの中では同じ名前のフィールドが優先されるので、フィールドと違う名前にしておく
                     開始 = 日付(r[開始日]),
                     日数の値 = 数(r[日数]),
-                    時間の値 = 日の数(r[時間])
+                    時間の値 = 日の数(r[時間]),
+                    単位の値 = 文字(r[単位])
                 in
                     [ファイル名 = f[ファイル名], 出勤用ID = f[出勤用ID], 氏名 = f[氏名],
                      申請日 = 日付(r[申請日]), 休暇の種類 = 文字(r[休暇の種類]), #"種別・内容" = 文字(r[#"種別・内容"]),
-                     単位 = 文字(r[単位]), 開始日 = 開始, 終了日 = 日付(r[終了日]),
+                     単位 = 単位の値, 開始日 = 開始, 終了日 = 日付(r[終了日]),
                      日数 = if 日数の値 = 0 then null else 日数の値,
                      時間 = if 時間の値 = 0 then null else 時間の値,
                      時刻 = 文字(r[時刻]), 事由 = 文字(r[事由]),
                      #"承認（所属長）" = 文字(r[#"承認（所属長）"]), 承認日 = 日付(r[承認日]),
                      所属長コメント = 文字(r[所属長コメント]), 確認 = 文字(r[確認]),
-                     分 = Number.Round(日数の値 * 465 + 時間の値 * 1440),
+                     // 時間・分単位は 1日あたりの時間×日数（日数が空欄なら1日）、日単位は 日数×7時間45分
+                     分 = if Text.Contains(単位の値, "時間") then Number.Round(時間の値 * 1440) * List.Max({1, 日数の値})
+                         else Number.Round(日数の値 * 465 + 時間の値 * 1440),
                      年 = if 開始 = null then null else Date.Year(開始),
                      月 = if 開始 = null then null else Date.Month(開始)]),
     型 = type table [ファイル名 = text, 出勤用ID = text, 氏名 = text, 申請日 = nullable date,
         休暇の種類 = text, #"種別・内容" = text, 単位 = text, 開始日 = nullable date, 終了日 = nullable date,
         日数 = nullable number, 時間 = nullable number, 時刻 = text, 事由 = text, #"承認（所属長）" = text,
         承認日 = nullable date, 所属長コメント = text, 確認 = text, 分 = number, 年 = nullable number, 月 = nullable number],
-    読めた = Table.SelectRows(申請用紙, each [読み取り] = "OK"),
+    読めた = Table.SelectRows(休暇申請シート, each [読み取り] = "OK"),
     行 = List.Combine(List.Transform(Table.ToRecords(読めた), 行にする))
 in
     Table.FromRecords(行, 型)

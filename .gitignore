@@ -4,6 +4,7 @@ npm-debug.log
 
 # 氏名を含むExcelはGitに入れない
 *.xlsx
+*.xlsm
 *.csv
 
 # 別のPCへの引き渡し一式（make_package.py で作る）
