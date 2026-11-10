@@ -24,6 +24,14 @@ try {
         $btn.OnAction = 'ImportRequests'
         $btn.Placement = 3      # セルに合わせて動かさない
     }
+    # ［超過勤務を転記］（超過勤務シートの B2 の月の、所属長の確認済みの超過勤務等命令簿を写す）
+    $ws = $wb.Worksheets.Item('超過勤務')
+    $ws.Rows.Item(2).RowHeight = 30
+    $c = $ws.Range('C2')
+    $btn = $ws.Shapes.AddFormControl(0, $c.Left + 2, $c.Top + 2, 130, 26)
+    $btn.OLEFormat.Object.Caption = '超過勤務を転記'
+    $btn.OnAction = 'TransferOvertime'
+    $btn.Placement = 3
     $wb.Worksheets.Item(1).Activate()
     if (Test-Path $Out) { Remove-Item $Out }
     $wb.SaveAs($Out, 52)   # 52 = マクロ有効ブック（.xlsm）

@@ -6,7 +6,8 @@ Option Explicit
 ' 調整には、休暇等シートの本年使用の調整に、Forms で申請して承認された年次休暇（休暇申請シートには書かれない分）を足して書く。
 '   ［休暇申請シートを作成］… 職員名簿の全員について、まだない人の休暇申請シートをひな形から作る（あれば作らない・上書きしない）
 '   ［休暇申請シートを更新］… 作成先にある全員の休暇申請シートの「管理」シートを、休暇等シートの今の値に書き換える
-'   ［様式を移行］…… 様式の古い休暇申請シートを、書いてある申請の行を残して新しいひな形の様式にする
+'   ［様式を移行］…… 様式の古い休暇申請シートを、書いてある申請の行と超過勤務等命令簿の月のシートを残して新しいひな形の様式にする
+'   ［超過勤務の月を追加］… 作成先にある全員の休暇申請シートに、B7 の月の超過勤務等命令簿のシート（超勤 R8.12 など）を作る
 
 Private Const DAY_MIN As Double = 465     ' 年次休暇の1日＝7時間45分＝465分
 Private Const STAFF_LAST As Long = 501    ' 出勤・休暇管理データ の職員名簿の最後の行
@@ -34,6 +35,225 @@ End Sub
 Public Sub MigrateLeaveSheets()
     MigrateAll False
 End Sub
+
+Public Sub AddOvertimeMonths()
+    AddMonthAll False
+End Sub
+
+' ===== 超過勤務等命令簿：月のシート =====
+' 休暇申請シートの非表示の「超勤ひな形」シート（tools/overtime/add_overtime_sheet.ps1 が入れる）を写して「超勤 R8.12」のような月のシートを作る。
+' W1 に月の1日、BH1 に前月のシートの BH2（前月の最終日の退庁時刻。25:00 のように日をまたぐ分が1日の欄に入る）を指す式を書き、
+' 月にない日（30日の月の31日など）の行を隠す。前月のシートがなければ BH1 は空（必要なら管理者が手で時刻を入れる）。
+
+' 本人・所属長が書く欄（様式を移行するとき、月のシートの値をこの範囲だけ写す）
+Private Const OT_INPUTS As String = "A5:B66,D5:I66,K5:L66,Y5:AA66,AC5:AE66,L69:O71,AC69:AE70,BH1"
+Private Const OT_TEMPLATE As String = "超勤ひな形"
+
+Public Sub AddMonthAll(ByVal quiet As Boolean)
+    Dim cfg As Worksheet, res As Worksheet
+    Set cfg = ThisWorkbook.Worksheets("設定")
+    Set res = ThisWorkbook.Worksheets("結果")
+    Dim outDir As String, ym As Date, problem As String
+    outDir = CleanPath(cfg.Range("B5").Value)
+    If outDir = "" Or Dir(outDir, vbDirectory) = "" Then problem = "作成先のフォルダが見つかりません（B5）。"
+    If problem = "" And Not IsDate(cfg.Range("B7").Value) Then problem = "超過勤務の月を入れてください（B7。例 2026/12）。"
+    res.Range("A2:E" & res.Rows.Count).ClearContents
+    If problem <> "" Then
+        res.Range("D2").Value = problem
+        If Not quiet Then MsgBox problem, vbExclamation
+        Exit Sub
+    End If
+    ym = DateSerial(Year(cfg.Range("B7").Value), Month(cfg.Range("B7").Value), 1)
+    If Right$(outDir, 1) <> "\" Then outDir = outDir & "\"
+    If Not quiet Then
+        If MsgBox("作成先の全員の休暇申請シートに、超過勤務等命令簿の「" & OvertimeSheetName(ym) & "」のシートを作ります。" & vbCrLf & _
+                  "職員や所属長が休暇申請シートを開いていない時間に実行してください。" & vbCrLf & vbCrLf & _
+                  "実行しますか？", vbYesNo + vbQuestion) <> vbYes Then Exit Sub
+    End If
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.AskToUpdateLinks = False
+
+    Dim names As New Collection, f As String, item As Variant
+    f = Dir(outDir & "休暇申請*.xlsx")
+    Do While f <> ""
+        If IsSheetFile(f) Then names.Add f
+        f = Dir()
+    Loop
+    Dim row As Long, note As String, done As Long, other As Long, parts() As String, id As String, nm As String
+    row = 2
+    For Each item In names
+        parts = NameParts(CStr(item))
+        id = parts(1)
+        nm = ""
+        If UBound(parts) >= 2 Then nm = parts(2)
+        note = AddMonthOne(outDir & item, ym)
+        If Left$(note, 4) = "作りまし" Then done = done + 1 Else other = other + 1
+        WriteResult res, row, id, nm, CStr(item), note
+        row = row + 1
+    Next item
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    res.Activate
+    If Not quiet Then MsgBox "「" & OvertimeSheetName(ym) & "」を作ったもの " & done & " 件、そのほか " & other & " 件です（結果シートを確かめてください）。", vbInformation
+End Sub
+
+' 休暇申請シート1つに月のシートを作る。結果の文を返す
+Private Function AddMonthOne(path As String, ym As Date) As String
+    On Error GoTo Failed
+    Dim wb As Workbook, note As String
+    Set wb = Workbooks.Open(Filename:=path, UpdateLinks:=0)
+    note = AddMonthSheet(wb, ym)
+    If Left$(note, 4) = "作りまし" Then
+        wb.Close SaveChanges:=True
+    Else
+        wb.Close SaveChanges:=False
+    End If
+    AddMonthOne = note
+    Exit Function
+Failed:
+    AddMonthOne = "作れませんでした：" & Err.Description
+    On Error Resume Next
+    If Not wb Is Nothing Then wb.Close SaveChanges:=False
+End Function
+
+' 開いているブックに月のシートを作る（保存はしない）。結果の文を返す
+Private Function AddMonthSheet(wb As Workbook, ym As Date) As String
+    Dim tpl As Worksheet, ws As Worksheet, s As Worksheet, anchor As Worksheet, nm As String
+    nm = OvertimeSheetName(ym)
+    Set tpl = SheetByName(wb, OT_TEMPLATE)
+    If tpl Is Nothing Then
+        AddMonthSheet = "様式が古いので作れませんでした（先に［様式を移行］してください）"
+        Exit Function
+    End If
+    If Not SheetByName(wb, nm) Is Nothing Then
+        AddMonthSheet = "すでにあるので作りませんでした"
+        Exit Function
+    End If
+    ' 置く場所：この月より後の月のシートの前。なければ「使い方」の前（なければ最後）
+    For Each s In wb.Worksheets
+        If OvertimeMonth(s.Name) > ym And anchor Is Nothing Then Set anchor = s
+    Next s
+    If anchor Is Nothing Then Set anchor = SheetByName(wb, "使い方")
+    ' 写したシートを名前の違いで探す（非表示のシートを写すと、写したシートも非表示で、作業中のシートにならないため）
+    Dim before As Object
+    Set before = CreateObject("Scripting.Dictionary")
+    For Each s In wb.Worksheets
+        before(s.Name) = True
+    Next s
+    tpl.Visible = xlSheetHidden          ' 完全に非表示（veryHidden）のシートは写せない
+    If anchor Is Nothing Then
+        tpl.Copy After:=wb.Worksheets(wb.Worksheets.Count)
+    Else
+        tpl.Copy Before:=anchor
+    End If
+    tpl.Visible = xlSheetVeryHidden
+    For Each s In wb.Worksheets
+        If Not before.Exists(s.Name) Then Set ws = s
+    Next s
+    ws.Name = nm
+    ws.Visible = xlSheetVisible
+    ws.Unprotect
+    ws.Range("W1").Value = ym
+    ' 前月の最終日の退庁時刻（前月のシートがあるときだけ。ないシートを指す式を書くとファイルを探す画面が出るため）
+    Dim prevName As String
+    prevName = OvertimeSheetName(DateAdd("m", -1, ym))
+    If Not SheetByName(wb, prevName) Is Nothing Then ws.Range("BH1").Formula = "='" & prevName & "'!$BH$2"
+    ' 月にない日の行を隠す
+    Dim lastDay As Long, d As Long
+    lastDay = Day(DateSerial(Year(ym), Month(ym) + 1, 0))
+    ws.Rows("5:66").Hidden = False
+    For d = lastDay + 1 To 31
+        ws.Rows((5 + 2 * (d - 1)) & ":" & (6 + 2 * (d - 1))).Hidden = True
+    Next d
+    ProtectOvertime ws
+    ' 翌月のシートが先にあれば、その BH1 をこのシートにつなぐ（手で時刻を入れてあれば変えない）
+    Dim nextWs As Worksheet
+    Set nextWs = SheetByName(wb, OvertimeSheetName(DateAdd("m", 1, ym)))
+    If Not nextWs Is Nothing Then
+        If Not nextWs.Range("BH1").HasFormula And CStr(nextWs.Range("BH1").Value) = "" Then
+            nextWs.Unprotect
+            nextWs.Range("BH1").Formula = "='" & nm & "'!$BH$2"
+            ProtectOvertime nextWs
+        End If
+    End If
+    AddMonthSheet = "作りました（" & nm & "）"
+End Function
+
+Private Sub ProtectOvertime(ws As Worksheet)
+    ' 書式（行の高さ・列の幅）の変更はできる。add_overtime_sheet.ps1 と同じ設定
+    ws.Protect DrawingObjects:=True, Contents:=True, Scenarios:=False, _
+               AllowFormattingCells:=True, AllowFormattingColumns:=True, AllowFormattingRows:=True
+End Sub
+
+' 2026/12/1 → 超勤 R8.12
+Private Function OvertimeSheetName(ym As Date) As String
+    OvertimeSheetName = "超勤 R" & (Year(ym) - 2018) & "." & Month(ym)
+End Function
+
+' 超勤 R8.12 → 2026/12/1。月のシートでなければ 0
+Private Function OvertimeMonth(ByVal nm As String) As Date
+    If Not nm Like "超勤 R*.*" Then Exit Function
+    Dim parts() As String
+    parts = Split(Mid$(nm, 5), ".")
+    If UBound(parts) <> 1 Then Exit Function
+    If Not IsNumeric(parts(0)) Or Not IsNumeric(parts(1)) Then Exit Function
+    If Val(parts(1)) < 1 Or Val(parts(1)) > 12 Then Exit Function
+    OvertimeMonth = DateSerial(2018 + Val(parts(0)), Val(parts(1)), 1)
+End Function
+
+Private Function SheetByName(wb As Workbook, nm As String) As Worksheet
+    Dim s As Worksheet
+    For Each s In wb.Worksheets
+        If s.Name = nm Then Set SheetByName = s: Exit Function
+    Next s
+End Function
+
+' 月のシートの書いた値（式でないセル）を「月 → (番地, 値) の一覧」で読む（様式を移行するとき用）
+Private Function ReadOvertimeInputs(wb As Workbook) As Collection
+    Dim result As New Collection, s As Worksheet, c As Range, items As Collection
+    For Each s In wb.Worksheets
+        If OvertimeMonth(s.Name) > 0 Then
+            Set items = New Collection
+            For Each c In s.Range(OT_INPUTS).Cells
+                If Not c.HasFormula Then
+                    If Not IsError(c.Value2) Then If CStr(c.Value2) <> "" Then items.Add Array(c.Address(False, False), c.Value2)
+                End If
+            Next c
+            result.Add Array(OvertimeMonth(s.Name), items)
+        End If
+    Next s
+    Set ReadOvertimeInputs = result
+End Function
+
+' 読んでおいた月のシートを、新しい様式のブックに作り直して値を書く。作った月の数を返す
+Private Function WriteOvertimeInputs(wb As Workbook, months As Collection) As Long
+    ' 前月のシートにつなぐため、古い月から作る
+    Dim order() As Long, i As Long, j As Long, tmp As Long, n As Long
+    n = months.Count
+    If n = 0 Then Exit Function
+    ReDim order(1 To n)
+    For i = 1 To n
+        order(i) = i
+    Next i
+    For i = 1 To n - 1
+        For j = i + 1 To n
+            If months(order(j))(0) < months(order(i))(0) Then tmp = order(i): order(i) = order(j): order(j) = tmp
+        Next j
+    Next i
+    Dim note As String, ws As Worksheet, cell As Variant
+    For i = 1 To n
+        note = AddMonthSheet(wb, CDate(months(order(i))(0)))
+        If Left$(note, 4) <> "作りまし" Then Err.Raise vbObjectError + 2, , "超過勤務のシート：" & note
+        Set ws = SheetByName(wb, OvertimeSheetName(CDate(months(order(i))(0))))
+        ws.Unprotect
+        For Each cell In months(order(i))(1)
+            ws.Range(cell(0)).Value2 = cell(1)
+        Next cell
+        ProtectOvertime ws
+        WriteOvertimeInputs = WriteOvertimeInputs + 1
+    Next i
+End Function
 
 ' 様式の古い休暇申請シートを新しい様式にする。元のファイルは控えのフォルダに複製してから、同じファイルに上書きする
 ' （別のファイルに置き換えると OneDrive の共有リンクが切れるため）。quiet が True のときはメッセージを出さない
@@ -121,7 +341,7 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
     Dim cols As Variant, c As Long, r As Long, n As Long, overwritten As Boolean
     cols = Array("申請日", "休暇の種類", "種別・内容", "単位", "開始日", "終了日", "開始時刻", "終了時刻", _
                  "事由", "承認（所属長）", "承認日", "所属長コメント")
-    Dim wb As Workbook, lo As ListObject, vals() As Variant, hasValue() As Boolean
+    Dim wb As Workbook, lo As ListObject, vals() As Variant, hasValue() As Boolean, otMonths As Collection, otCount As Long
     On Error GoTo Failed
 
     ' 古いファイルから読む（式の入ったセルは、新しい様式の式に任せるので写さない）
@@ -157,6 +377,7 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
             End With
         Next r
     End If
+    Set otMonths = ReadOvertimeInputs(wb)      ' 超過勤務等命令簿の月のシートの書いた値
     wb.Close SaveChanges:=False
     Set wb = Nothing
 
@@ -198,10 +419,11 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
         End If
     Next r
     rowCount = target
+    otCount = WriteOvertimeInputs(wb, otMonths)
     Application.Calculation = xlCalculationAutomatic
     wb.Close SaveChanges:=True
     Set wb = Nothing
-    MigrateOne = "移行しました（申請 " & rowCount & " 行）。元のファイルの控え：" & backupDir & fileName
+    MigrateOne = "移行しました（申請 " & rowCount & " 行、超過勤務の月 " & otCount & "）。元のファイルの控え：" & backupDir & fileName
     If noClock > 0 Then MigrateOne = MigrateOne & "【時刻がなく時間だけの行が " & noClock & " 行あります。開始時刻・終了時刻を入れてください（赤くなっています）】"
     Exit Function
 Failed:

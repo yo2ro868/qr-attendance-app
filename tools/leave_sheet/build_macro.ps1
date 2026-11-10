@@ -23,12 +23,13 @@ try {
 
     $cfg.Range('A1').Value2 = '休暇申請シートの作成'
     $cfg.Range('A1').Font.Size = 14; $cfg.Range('A1').Font.Bold = $true; $cfg.Range('A1').Font.Color = 0x5F3A1E
-    $labels = @('出勤・休暇管理データ のファイル', 'ひな形のファイル', '作成先のフォルダ', '年（西暦）')
+    $labels = @('出勤・休暇管理データ のファイル', 'ひな形のファイル', '作成先のフォルダ', '年（西暦）', '超過勤務の月')
     $hints = @(
         '出勤・休暇管理データ.xlsm の場所（職員名簿の 出勤用ID・氏名 と、休暇等シートの合計・本年使用の調整を読みます）',
         '休暇申請シート（ひな形）.xlsx の場所（［休暇申請シートを作成］のときだけ使います）',
         'OneDrive の「休暇申請」フォルダの場所（ここに 休暇申請シート　出勤用ID　氏名.xlsx を作ります）',
-        '休暇申請シートに設定する年（出勤・休暇管理データ の休暇等シートのこの年の行を読みます）')
+        '休暇申請シートに設定する年（出勤・休暇管理データ の休暇等シートのこの年の行を読みます）',
+        '［超過勤務の月を追加］で作る超過勤務等命令簿の月（例 2026/12。その月のシート「超勤 R8.12」を全員の休暇申請シートに作ります）')
     for ($i = 0; $i -lt $labels.Count; $i++) {
         $r = 3 + $i
         $cfg.Range("A$r").Value2 = $labels[$i]; $cfg.Range("A$r").Font.Bold = $true
@@ -38,6 +39,10 @@ try {
     }
     $cfg.Range('B6').Value2 = [double](Get-Date).Year
     $cfg.Range('B6').HorizontalAlignment = -4131
+    $next = (Get-Date -Day 1).AddMonths(1)
+    $cfg.Range('B7').Value2 = [double]$next.Date.ToOADate()
+    $cfg.Range('B7').NumberFormat = 'yyyy/m'
+    $cfg.Range('B7').HorizontalAlignment = -4131
     $cfg.Columns.Item(1).ColumnWidth = 24
     $cfg.Columns.Item(2).ColumnWidth = 60
     $notes = @(
@@ -49,16 +54,18 @@ try {
         '3.［休暇申請シートを更新］：作成先にある全員の休暇申請シートに、出勤・休暇管理データ の休暇等シートの B6 の年の 合計・本年使用の調整 を書き込みます。',
         '   年が変わったとき、休暇等シートの本年分・繰越分・調整を変えたときに押します。休暇申請シートの「年次休暇の残り」に反映されます。',
         '   職員が休暇申請シートを開いて書いている最中に押すと、書き込みがぶつかることがあります。朝や夕方など、使われていない時間に押してください。',
-        '4.［様式を移行］：ひな形を新しくしたあと、様式の古い休暇申請シートを、書いてある申請の行を残して新しい様式にします（共有はそのまま）。元のファイルは作成先の中の 旧様式_日時 のフォルダに残します。',
+        '4.［様式を移行］：ひな形を新しくしたあと、様式の古い休暇申請シートを、書いてある申請の行と超過勤務等命令簿の月のシートを残して新しい様式にします（共有はそのまま）。元のファイルは作成先の中の 旧様式_日時 のフォルダに残します。',
         '   B4 を新しいひな形にして、職員や所属長が開いていない時間に押します。',
-        '5. 結果シートで、職員ごとの結果を確かめます。',
+        '5.［超過勤務の月を追加］：毎月の終わりごろに、B7 を翌月にして押します。全員の休暇申請シートに超過勤務等命令簿のその月のシート（超勤 R8.12 など）を作り、前月の最終日の退庁時刻（25:00 など）をつなぎます。あるシートは作り直しません。',
+        '6. 結果シートで、職員ごとの結果を確かめます。',
         '※ 休暇申請シートでは、年・合計・調整は非表示の「管理」シートに入り、本人・所属長には見えません（見えるのは氏名と、計算した残り日数などだけです）。')
     for ($i = 0; $i -lt $notes.Count; $i++) {
         $c = $cfg.Range("A$(11 + $i)"); $c.Value2 = $notes[$i]
         if ($i -eq 0) { $c.Font.Bold = $true } else { $c.Font.Size = 9 }
     }
     # フォーム コントロールのボタン（0 = xlButtonControl）
-    $buttons = @(@('休暇申請シートを作成', 'CreateLeaveSheets', 0), @('休暇申請シートを更新', 'UpdateLeaveSheets', 170), @('様式を移行', 'MigrateLeaveSheets', 340))
+    $buttons = @(@('休暇申請シートを作成', 'CreateLeaveSheets', 0), @('休暇申請シートを更新', 'UpdateLeaveSheets', 170), @('様式を移行', 'MigrateLeaveSheets', 340),
+                 @('超過勤務の月を追加', 'AddOvertimeMonths', 510))
     foreach ($b in $buttons) {
         $btn = $cfg.Shapes.AddFormControl(0, $cfg.Range('B8').Left + $b[2], $cfg.Range('B8').Top, 160, 26)
         $btn.OLEFormat.Object.Caption = $b[0]

@@ -16,6 +16,7 @@ from openpyxl.formatting.rule import FormulaRule
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.workbook.defined_name import DefinedName
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "matching_excel"))
 from holidays import HOLIDAYS
@@ -56,7 +57,7 @@ UNIT_TIME_ONLY = ["介護時間", "育児時間"]     # 時間・分単位だけ
 UNIT_DAY_ONLY = []                            # 日単位だけ（該当なし。必要になったら足す）
 APPROVALS = ["承認", "却下", "取消"]
 # 様式の版。申請シートの式や列を変えたら変える（マクロが、ひな形と版の違う休暇申請シートを結果シートで知らせる）
-FORM_VERSION = "2026-11-06d"
+FORM_VERSION = "2026-11-10a"
 
 f_base = Font(name=FONT, size=10)
 f_bold = Font(name=FONT, size=10, bold=True)
@@ -184,6 +185,11 @@ for i, v in enumerate(TIMES, start=1):
     mg[f"V{i}"] = v
     mg[f"V{i}"].number_format = "h:mm"
 TIME_RANGE = f"{MG}!$V$1:$V${len(TIMES)}"
+# 超過勤務等命令簿（tools/overtime/add_overtime_sheet.ps1 が入れる「超勤ひな形」シート）が使う名前：
+# 休日（祝日と年末年始。休日・代休日の欄の自動の○と、日附の色）、振替（○の一覧。X列）
+mg["X1"] = "○"
+wb.defined_names["休日"] = DefinedName("休日", attr_text=OFF_DAYS)
+wb.defined_names["振替"] = DefinedName("振替", attr_text=f"{MG}!$X$1:$X$2")
 mg.sheet_state = "veryHidden"     # 本人・所属長からは見えない（Excel の［再表示］にも出ない）
 
 # ----- 2〜3行目：氏名と年次休暇の残りなど（自動）。4行目は分の計算用で非表示 -----

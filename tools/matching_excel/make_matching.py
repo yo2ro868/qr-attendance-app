@@ -804,6 +804,33 @@ ws["J2"].font = f_note
 ws.column_dimensions["A"].width = 22
 wb.defined_names["テレワークフォルダ"] = DefinedName("テレワークフォルダ", attr_text=f"{TW}!$B$2")
 
+# ===== 超過勤務（休暇申請シートの超過勤務等命令簿。tools/overtime） =====
+# 超過勤務：B2 の月の所属長の確認済みの分を［超過勤務を転記］で写した、1人1か月の計（値。あとで命令簿が変わっても変わらない）
+# 超過勤務の日別：同じく写した日ごとの行と、出勤の記録・休暇との照合（照合の列だけは式）
+# 超過勤務の読み込み：命令簿を Power Query で読んだ今の内容（確認待ちも含む）。表はどれも add_queries.ps1 が作る
+ws = wb.create_sheet("超過勤務")
+ws["A1"] = "超過勤務等命令簿（休暇申請シートの月のシート）の、所属長の確認済みの月を写したものです（1人1か月で1行）。日ごとの行と照合は「超過勤務の日別」シート。"
+ws["A1"].font = f_note
+ws["A2"] = "転記する月"
+ws["A2"].font = f_bold
+ws["B2"] = date(2026, 11, 1)
+ws["B2"].number_format = 'yyyy"年"m"月"'
+ws["B2"].fill, ws["B2"].font, ws["B2"].border = fill_input, f_bold, border
+ws["B2"].alignment = left
+ws["E2"] = ("← 月を入れて［超過勤務を転記］を押すと、その月の所属長の確認済みの命令簿を写します（同じ人・同じ月を前に写していれば置き換えます）。"
+            "確認待ちの人は写しません（「超過勤務の読み込み」シートで確かめられます）。")
+ws["E2"].font = f_note
+ws.column_dimensions["A"].width = 12
+ws.column_dimensions["B"].width = 14
+ws = wb.create_sheet("超過勤務の日別")
+ws["A1"] = ("［超過勤務を転記］で写した日ごとの行です。「注意」の列に、出勤の記録（QR の出勤登録・テレワークの予定）がない日、"
+            "承認済みの休暇がある日が出ます（出勤記録の貼り付けや休暇の承認が変われば、注意も変わります）。")
+ws["A1"].font = f_note
+ws = wb.create_sheet("超過勤務の読み込み")
+ws["A1"] = ("休暇申請シートの超過勤務等命令簿を読んだ今の内容です（開いたとき、または［申請を取り込む］・［超過勤務を転記］で最新になります）。"
+            "左が1人1か月の計と所属長の確認、右（AG 列から）が日ごとの行です。")
+ws["A1"].font = f_note
+
 wb.calculation.calcMode = "auto"
 wb.calculation.fullCalcOnLoad = True
 wb.active = 0
