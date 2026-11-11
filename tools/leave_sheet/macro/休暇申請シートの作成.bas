@@ -12,6 +12,9 @@ Option Explicit
 Private Const DAY_MIN As Double = 465     ' 年次休暇の1日＝7時間45分＝465分
 Private Const STAFF_LAST As Long = 501    ' 出勤・休暇管理データ の職員名簿の最後の行
 Private Const LEAVE_LAST As Long = 1001   ' 出勤・休暇管理データ の休暇等（計算用シート）の最後の行
+' 超過勤務等命令簿の月のシート：本人・所属長が書く欄（様式を移行するとき、月のシートの値をこの範囲だけ写す）と、ひな形のシートの名前
+Private Const OT_INPUTS As String = "A5:B66,D5:I66,K5:L66,Y5:AA66,AC5:AE66,L69:O71,AC69:AE70,BH1"
+Private Const OT_TEMPLATE As String = "超勤ひな形"
 
 ' 出勤・休暇管理データ から読んだ値
 Private staff As Variant      ' 職員名簿 A:B（出勤用ID・氏名）
@@ -44,10 +47,6 @@ End Sub
 ' 休暇申請シートの非表示の「超勤ひな形」シート（tools/overtime/add_overtime_sheet.ps1 が入れる）を写して「超勤 R8.12」のような月のシートを作る。
 ' W1 に月の1日、BH1 に前月のシートの BH2（前月の最終日の退庁時刻。25:00 のように日をまたぐ分が1日の欄に入る）を指す式を書き、
 ' 月にない日（30日の月の31日など）の行を隠す。前月のシートがなければ BH1 は空（必要なら管理者が手で時刻を入れる）。
-
-' 本人・所属長が書く欄（様式を移行するとき、月のシートの値をこの範囲だけ写す）
-Private Const OT_INPUTS As String = "A5:B66,D5:I66,K5:L66,Y5:AA66,AC5:AE66,L69:O71,AC69:AE70,BH1"
-Private Const OT_TEMPLATE As String = "超勤ひな形"
 
 Public Sub AddMonthAll(ByVal quiet As Boolean)
     Dim cfg As Worksheet, res As Worksheet
