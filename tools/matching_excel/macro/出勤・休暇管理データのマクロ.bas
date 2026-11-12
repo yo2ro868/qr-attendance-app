@@ -1,6 +1,7 @@
 Attribute VB_Name = "MatchingMacro"
 Option Explicit
-' 出勤・休暇管理データ の［申請を取り込む］ボタン：休暇申請シートと Forms の回答を読み直し、休暇等・出勤簿・申請一覧を最新にする。
+' 出勤・休暇管理データ の［最新を読み込む］（目次）・［申請を取り込む］ボタン：休暇申請シート・Forms の回答・テレワーク予定表・
+' 超過勤務等命令簿を読み直し、休暇等・出勤簿・申請一覧・テレワーク一覧・超過勤務の読み込みを最新にする（開いたときには読み直さない）。
 ' 読み込むのは保存された内容なので、同じ Excel で開いている休暇申請シートに未保存の変更があれば、先に保存するか聞く。
 
 Public Sub ImportRequests()
@@ -34,9 +35,14 @@ Public Sub ImportRequests()
         waiting = WorksheetFunction.CountIf(lo.ListColumns("状況").DataBodyRange, "承認待ち")
         notes = WorksheetFunction.CountIf(lo.ListColumns("確認").DataBodyRange, "?*")
     End If
-    MsgBox "申請を取り込みました。" & vbCrLf & vbCrLf & _
-           "申請 " & total & " 件（うち承認待ち " & waiting & " 件）" & vbCrLf & _
-           "注意のある行 " & notes & " 件（申請一覧シートの「確認」の列）", vbInformation
+    Dim tele As Long, otWaiting As Long
+    tele = CountColumn("テレワーク一覧", "テレワーク一覧", "注意", "?*")
+    otWaiting = CountColumn("超過勤務の読み込み", "超勤_月", "状況", "確認待ち")
+    MsgBox "最新の内容を読み込みました。" & vbCrLf & vbCrLf & _
+           "休暇の申請 " & total & " 件（うち承認待ち " & waiting & " 件、注意のある行 " & notes & " 件）" & vbCrLf & _
+           "テレワークの注意 " & tele & " 件" & vbCrLf & _
+           "超過勤務等命令簿の所属長の確認待ち " & otWaiting & " 人・月" & vbCrLf & vbCrLf & _
+           "くわしくは目次シートの各行から確かめてください。", vbInformation
     Exit Sub
 Failed:
     Application.StatusBar = False
@@ -122,6 +128,16 @@ Failed:
     Application.ScreenUpdating = True
     MsgBox "転記できませんでした：" & Err.Description, vbExclamation
 End Sub
+
+' シートの表の列で、条件に合うセルの数（表が空・見つからなければ 0）
+Private Function CountColumn(sheetName As String, tableName As String, col As String, crit As String) As Long
+    On Error Resume Next
+    Dim lo As ListObject
+    Set lo = ThisWorkbook.Worksheets(sheetName).ListObjects(tableName)
+    If lo Is Nothing Then Exit Function
+    If lo.DataBodyRange Is Nothing Then Exit Function
+    CountColumn = WorksheetFunction.CountIf(lo.ListColumns(col).DataBodyRange, crit)
+End Function
 
 ' 表の r 行目（1から）の列の値を文字で
 Private Function CellText(lo As ListObject, r As Long, col As String) As String

@@ -24,6 +24,21 @@ try {
         $btn.OnAction = 'ImportRequests'
         $btn.Placement = 3      # セルに合わせて動かさない
     }
+    # 目次：E 列の「[ボタン]マクロ名|表示」をボタンに、F 列の「[式]=…」を式にする（make_matching.py が書いておく）
+    $ws = $wb.Worksheets.Item('目次')
+    foreach ($c in $ws.Range('E1:F80').Cells) {
+        $v = [string]$c.Value2
+        if ($v.StartsWith('[ボタン]')) {
+            $parts = $v.Substring(5).Split('|')
+            $c.Value2 = [string]''
+            $btn = $ws.Shapes.AddFormControl(0, $c.Left + 2, $c.Top + 2, $c.Width - 4, $c.Height - 4)
+            $btn.OLEFormat.Object.Caption = $parts[1]
+            $btn.OnAction = $parts[0]
+            $btn.Placement = 3
+        } elseif ($v.StartsWith('[式]')) {
+            $c.Formula = $v.Substring(3)
+        }
+    }
     # ［超過勤務を転記］（超過勤務シートの B2 の月の、所属長の確認済みの超過勤務等命令簿を写す）
     $ws = $wb.Worksheets.Item('超過勤務')
     $ws.Rows.Item(2).RowHeight = 30

@@ -37,8 +37,8 @@ $loaded = [ordered]@{
     'テレワーク一覧'  = @{ Sheet = 'テレワーク一覧'; At = 'A5'; Count = ''; Time = @('開始時刻', '終了時刻', '時間'); Date = @('日付') }
     'テレワーク_日別' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AD8'; Count = 'AD6'; Time = @(); Date = @() }
     # 超過勤務等命令簿（休暇申請シートの月のシート）：1人1か月の計と確認、日ごとの行
-    '超勤_月'   = @{ Sheet = '超過勤務の読み込み'; At = 'A3'; Count = ''; Time = ($otBuckets + $otAllowance + @('60時間超（+25）', '60時間超（+15）')); Date = @('確認日'); Whole = $true }
-    '超勤_日別' = @{ Sheet = '超過勤務の読み込み'; At = 'AG3'; Count = ''; Time = (@('登庁時刻', '退庁時刻', '休憩時間') + $otBuckets); Date = @('確認日', '日付'); Whole = $true }
+    '超勤_月'   = @{ Sheet = '超過勤務の読み込み'; At = 'A3'; Count = ''; Time = ($otBuckets + $otAllowance + @('60時間超（+25）', '60時間超（+15）')); Date = @('確認日') }
+    '超勤_日別' = @{ Sheet = '超過勤務の読み込み'; At = 'AG3'; Count = ''; Time = (@('登庁時刻', '退庁時刻', '休憩時間') + $otBuckets); Date = @('確認日', '日付') }
 }
 $settings = @{ 'B2' = $Folder; 'B3' = $FormsRequest; 'B4' = $FormsApproval }
 
@@ -69,23 +69,21 @@ try {
         $qt.CommandText = "SELECT * FROM [$name]"
         $qt.BackgroundQuery = $false
         $qt.PreserveFormatting = $true
-        $qt.AdjustColumnWidth = ($name -eq '申請一覧' -or $spec.Whole)
+        $qt.AdjustColumnWidth = ($name -eq '申請一覧' -or $name -like '超勤_*')
         $qt.Refresh($false) | Out-Null
-        # 出勤・休暇管理データ を開いたときに読み直す
-        $lo.QueryTable.WorkbookConnection.OLEDBConnection.RefreshOnFileOpen = $true
-        # 行数（出勤簿などがこの範囲だけを探す）。表の名前で書くので、読み直して行が増減しても合う
+        # 開いたときには読み直さない（全部のクエリを読み直すと、読む場所が空でも1分ほどかかるため）。
+        # 目次などの［最新を読み込む］（ImportRequests）を押したときに読み直す
+        $lo.QueryTable.WorkbookConnection.OLEDBConnection.RefreshOnFileOpen = $false
+        # 書式は列全体に付ける（読み直して増えた行にも付く。空のセルごとに書式を持たせるとファイルが何MBも大きくなる）
+        foreach ($pair in @(@($spec.Time, '[h]:mm'), @($spec.Date, 'yyyy/m/d'))) {
+            foreach ($col in $pair[0]) {
+                $ws.Columns.Item($lo.ListColumns.Item($col).Range.Column).NumberFormat = $pair[1]
+            }
+        }
+        # 行数（出勤簿などがこの範囲だけを探す）。表の名前で書くので、読み直して行が増減しても合う。列全体の書式のあとに付ける
         if ($spec.Count) {
             $ws.Range($spec.Count).Formula = "=COUNTA($name[キー])"
             $ws.Range($spec.Count).NumberFormat = '"（"0"行）"'
-        }
-        # 書式は見出しより下の列全体に付ける（空の表でも、読み直して増えた行に書式が付くように）
-        $first = $ws.Range($spec.At).Row + 1
-        foreach ($pair in @(@($spec.Time, '[h]:mm'), @($spec.Date, 'yyyy/m/d'))) {
-            foreach ($col in $pair[0]) {
-                $c = $lo.ListColumns.Item($col).Range.Column
-                if ($spec.Whole) { $ws.Columns.Item($c).NumberFormat = $pair[1] }   # 列全体（空のセルごとの書式を持たないので、ファイルが大きくならない）
-                else { $ws.Range($ws.Cells.Item($first, $c), $ws.Cells.Item($first + 19999, $c)).NumberFormat = $pair[1] }
-            }
         }
     }
     # ----- ［超過勤務を転記］で写す先の表（値。照合の列だけは式）。見出しは読み込んだ表と同じ＋転記日時 -----
