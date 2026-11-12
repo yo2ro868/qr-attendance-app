@@ -665,7 +665,7 @@ app.get('/admin/attendance/:id', requireAdmin, async (req, res) => {
     ['出勤時刻', rec.attendance_time],
     ['登録日時', rec.registered_at],
     ['IPアドレス', rec.ip_address || '-'],
-    ['端末情報', rec.device_info || '-'],
+    // 端末情報（device_info）は記録は続けるが、画面には出さない（管理者の希望。2026-11-12）
   ];
   res.send(layout('出勤詳細', `
     <div class="card">
