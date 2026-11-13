@@ -19,7 +19,9 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.workbook.defined_name import DefinedName
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "matching_excel"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "flex"))
 from holidays import HOLIDAYS
+import flex_sheets
 
 OUT = sys.argv[1]
 FONT = "ＭＳ Ｐゴシック"
@@ -57,7 +59,7 @@ UNIT_TIME_ONLY = ["介護時間", "育児時間"]     # 時間・分単位だけ
 UNIT_DAY_ONLY = []                            # 日単位だけ（該当なし。必要になったら足す）
 APPROVALS = ["承認", "却下", "取消"]
 # 様式の版。申請シートの式や列を変えたら変える（マクロが、ひな形と版の違う休暇申請シートを結果シートで知らせる）
-FORM_VERSION = "2026-11-10a"
+FORM_VERSION = "2026-11-12a"
 
 f_base = Font(name=FONT, size=10)
 f_bold = Font(name=FONT, size=10, bold=True)
@@ -434,6 +436,9 @@ ws.page_setup.fitToHeight = 0
 ws.sheet_properties.pageSetUpPr.fitToPage = True
 ws.print_title_rows = f"{HEAD}:{HEAD}"
 
+# ===== フレックスタイム制の申告・割振り（tools/flex）。様式どおりの「申告・割振り簿」は add_flex_book.ps1 が足す =====
+flex_sheets.add(wb, MG, OFF_DAYS)
+
 # ===== 使い方 =====
 us = wb.create_sheet("使い方")
 us.column_dimensions["A"].width = 110
@@ -462,6 +467,12 @@ for i, text in enumerate([
     "■ 管理者",
     "・年・合計・本年使用の調整（導入前の使用など）は、出勤・休暇管理データ の「休暇等」シートで全職員分を管理し、休暇申請シートの作成.xlsm の［休暇申請シートを更新］でこの用紙に書き込みます（非表示の「管理」シート）。",
     "・このファイルは管理者の OneDrive にあり、本人と所属長にだけ共有しています。ほかの人には見えません。",
+    "",
+    "■ フレックスタイム制（フレックスタイム制で勤務する人）",
+    "・本人：「フレックス申告」シートに、単位期間（4週間）ごとの勤務開始・終了・休憩を時と分に分けて書き、右の表の申告年月日を入れて所属長に伝えます。",
+    "・所属長：「フレックス割振り」シートで内容を確かめ、右の表の承認の欄で「承認」を選び、割振年月日を入れます。",
+    "・「申告・割振り簿」シートは、総務課の様式どおりの完成版です（印刷用。ここでは書き換えられません）。F5〜I5 の単位期間を変えると、その期間の合計が出ます。",
+    "・承認の後で申告を書き直したら、申告年月日を書き直した日にします。所属長が割振年月日を書き直す（承認し直す）まで、承認されていない扱いになります。",
 ], start=3):
     us[f"A{i}"] = text
     us[f"A{i}"].font = f_bold if text.startswith("■") else f_base

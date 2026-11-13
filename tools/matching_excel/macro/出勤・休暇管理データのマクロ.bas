@@ -1,7 +1,8 @@
 Attribute VB_Name = "MatchingMacro"
 Option Explicit
 ' 出勤・休暇管理データ の［最新を読み込む］（目次）・［申請を取り込む］ボタン：休暇申請シート・Forms の回答・テレワーク予定表・
-' 超過勤務等命令簿を読み直し、休暇等・出勤簿・申請一覧・テレワーク一覧・超過勤務の読み込みを最新にする（開いたときには読み直さない）。
+' 超過勤務等命令簿・フレックスの申告と割振りを読み直し、休暇等・出勤簿・申請一覧・テレワーク一覧・超過勤務の読み込み・フレックスを最新にする（開いたときには読み直さない）。
+' フレックスは、所属長の承認済みになった単位期間（フレックス一覧の取り込みが「取り込む」）を「フレックスの日別」に写す（承認時の内容として残す）。
 ' 読み込むのは保存された内容なので、同じ Excel で開いている休暇申請シートに未保存の変更があれば、先に保存するか聞く。
 
 Public Sub ImportRequests()
@@ -24,6 +25,9 @@ Public Sub ImportRequests()
     ThisWorkbook.RefreshAll
     Application.CalculateUntilAsyncQueriesDone
     Application.Calculate
+    Dim flexTaken As Long
+    Application.StatusBar = "承認済みのフレックスを取り込んでいます..."
+    flexTaken = TakeFlexSnapshot()
     ThisWorkbook.Worksheets("休暇申請シートの読み込み").Range("B5").Value = Now
     Application.StatusBar = False
     Application.Cursor = xlDefault
@@ -35,13 +39,16 @@ Public Sub ImportRequests()
         waiting = WorksheetFunction.CountIf(lo.ListColumns("状況").DataBodyRange, "承認待ち")
         notes = WorksheetFunction.CountIf(lo.ListColumns("確認").DataBodyRange, "?*")
     End If
-    Dim tele As Long, otWaiting As Long
+    Dim tele As Long, otWaiting As Long, flexNotes As Long, flexDayNotes As Long
+    flexNotes = CountColumn("フレックス", "フレックス一覧", "注意", "?*")
+    flexDayNotes = CountColumn("フレックスの日別", "確定_フレックス日別", "注意", "?*")
     tele = CountColumn("テレワーク一覧", "テレワーク一覧", "注意", "?*")
     otWaiting = CountColumn("超過勤務の読み込み", "超勤_月", "状況", "確認待ち")
     MsgBox "最新の内容を読み込みました。" & vbCrLf & vbCrLf & _
            "休暇の申請 " & total & " 件（うち承認待ち " & waiting & " 件、注意のある行 " & notes & " 件）" & vbCrLf & _
            "テレワークの注意 " & tele & " 件" & vbCrLf & _
-           "超過勤務等命令簿の所属長の確認待ち " & otWaiting & " 人・月" & vbCrLf & vbCrLf & _
+           "超過勤務等命令簿の所属長の確認待ち " & otWaiting & " 人・月" & vbCrLf & _
+           "フレックス：今回取り込んだ単位期間 " & flexTaken & " 件、注意 " & flexNotes & " 件、日ごとの注意 " & flexDayNotes & " 日" & vbCrLf & vbCrLf & _
            "くわしくは目次シートの各行から確かめてください。", vbInformation
     Exit Sub
 Failed:
@@ -128,6 +135,132 @@ Failed:
     Application.ScreenUpdating = True
     MsgBox "転記できませんでした：" & Err.Description, vbExclamation
 End Sub
+
+' フレックス一覧で取り込みが「取り込む」の単位期間（出勤用ID|期間|期間の開始日）を、フレックス_日別（今の内容）から
+' 確定_フレックス日別に写す（同じ単位期間を前に写していれば置き換える）。写したら、写した内容を読む表を読み直す。写した単位期間の数を返す
+Private Function TakeFlexSnapshot() As Long
+    Dim list As ListObject, src As ListObject, dst As ListObject, keys As Object, r As Long
+    On Error Resume Next
+    Set list = ThisWorkbook.Worksheets("フレックス").ListObjects("フレックス一覧")
+    Set src = ThisWorkbook.Worksheets("フレックスの読み込み").ListObjects("フレックス_日別")
+    Set dst = ThisWorkbook.Worksheets("フレックスの日別").ListObjects("確定_フレックス日別")
+    On Error GoTo 0
+    If list Is Nothing Or src Is Nothing Or dst Is Nothing Then Exit Function
+    If list.DataBodyRange Is Nothing Then Exit Function
+    Set keys = CreateObject("Scripting.Dictionary")
+    For r = 1 To list.ListRows.Count
+        If CellText(list, r, "取り込み") = "取り込む" Then
+            keys(CellText(list, r, "出勤用ID") & "|" & CellText(list, r, "期間") & "|" & DateKey(list.ListColumns("開始日").DataBodyRange.Cells(r).Value)) = True
+        End If
+    Next r
+    If keys.Count = 0 Then Exit Function
+    Application.ScreenUpdating = False
+    ReplaceByKey dst, src, keys, Array("出勤用ID", "期間", "期間の開始日"), "確定日時", Now
+    Application.ScreenUpdating = True
+    ' 写した内容を読む表（一覧の取り込み・注意、出勤簿の備考）を読み直す
+    list.QueryTable.Refresh False
+    ThisWorkbook.Worksheets("休暇申請シートの読み込み").ListObjects("フレックス_出勤簿").QueryTable.Refresh False
+    Application.Calculate
+    TakeFlexSnapshot = keys.Count
+End Function
+
+Private Function DateKey(v As Variant) As String
+    If IsDate(v) Then DateKey = Format(v, "yyyy-mm-dd") Else DateKey = CStr(v)
+End Function
+
+' 写す先の表 dst から、keys にあるキー（keyCols の列の値を | でつないだもの。日付は yyyy-mm-dd）の行を除き、
+' 読み込んだ表 src のそのキーの行を足して書き直す。見出しが同じ名前の列を写す。stampCol の列には stamp、式の列は全部の行に入れ直す
+Private Sub ReplaceByKey(dst As ListObject, src As ListObject, keys As Object, keyCols As Variant, stampCol As String, stamp As Date)
+    Dim nCols As Long, c As Long, r As Long, k As Long, i As Long
+    nCols = dst.ListColumns.Count
+    Dim formulas() As String, srcCol() As Long, dKey() As Long, sKey() As Long
+    ReDim formulas(1 To nCols)
+    ReDim srcCol(1 To nCols)
+    ReDim dKey(0 To UBound(keyCols))
+    ReDim sKey(0 To UBound(keyCols))
+    For c = 1 To nCols
+        If Not dst.DataBodyRange Is Nothing Then
+            If dst.ListColumns(c).DataBodyRange.Cells(1).HasFormula Then formulas(c) = dst.ListColumns(c).DataBodyRange.Cells(1).Formula
+        End If
+        For k = 1 To src.ListColumns.Count
+            If src.ListColumns(k).Name = dst.ListColumns(c).Name Then srcCol(c) = k
+        Next k
+    Next c
+    For i = 0 To UBound(keyCols)
+        dKey(i) = dst.ListColumns(CStr(keyCols(i))).Index
+        sKey(i) = src.ListColumns(CStr(keyCols(i))).Index
+    Next i
+    Dim keep As New Collection, rowVals() As Variant, dv As Variant, sv As Variant, oldRows As Long, kk As String
+    oldRows = dst.ListRows.Count
+    If Not dst.DataBodyRange Is Nothing Then
+        dv = dst.DataBodyRange.Value
+        For r = 1 To oldRows
+            kk = RowKey(dv, r, dKey)
+            If kk <> "" And Not keys.Exists(kk) Then
+                ReDim rowVals(1 To nCols)
+                For c = 1 To nCols
+                    If formulas(c) = "" Then rowVals(c) = dv(r, c)
+                Next c
+                keep.Add rowVals
+            End If
+        Next r
+    End If
+    If Not src.DataBodyRange Is Nothing Then
+        sv = src.DataBodyRange.Value
+        For r = 1 To src.ListRows.Count
+            If keys.Exists(RowKey(sv, r, sKey)) Then
+                ReDim rowVals(1 To nCols)
+                For c = 1 To nCols
+                    If srcCol(c) > 0 Then
+                        rowVals(c) = sv(r, srcCol(c))
+                    ElseIf dst.ListColumns(c).Name = stampCol Then
+                        rowVals(c) = stamp
+                    End If
+                Next c
+                keep.Add rowVals
+            End If
+        Next r
+    End If
+    Dim n As Long, data() As Variant
+    n = keep.Count
+    If oldRows > 0 And Not dst.DataBodyRange Is Nothing Then dst.DataBodyRange.ClearContents
+    dst.Resize dst.Range.Resize(1 + IIf(n > 0, n, 1))
+    If oldRows > IIf(n > 0, n, 1) Then dst.Range.Offset(1 + IIf(n > 0, n, 1)).Resize(oldRows - IIf(n > 0, n, 1)).ClearContents
+    If n > 0 Then
+        For c = 1 To nCols
+            If formulas(c) = "" Then
+                ReDim data(1 To n, 1 To 1)
+                For r = 1 To n
+                    data(r, 1) = keep(r)(c)
+                Next r
+                dst.ListColumns(c).DataBodyRange.Value = data
+            End If
+        Next c
+    End If
+    For c = 1 To nCols
+        If formulas(c) <> "" Then dst.ListColumns(c).DataBodyRange.Formula = formulas(c)
+    Next c
+    If n > 1 Then
+        With dst.Sort
+            .SortFields.Clear
+            .SortFields.Add Key:=dst.ListColumns("出勤用ID").DataBodyRange, Order:=xlAscending
+            .SortFields.Add Key:=dst.ListColumns("日付").DataBodyRange, Order:=xlAscending
+            .Header = xlYes
+            .Apply
+        End With
+    End If
+End Sub
+
+' 2次元配列の r 行目の、cols の列の値を | でつないだキー（日付は yyyy-mm-dd、出勤用ID が空なら ""）
+Private Function RowKey(v As Variant, r As Long, cols() As Long) As String
+    Dim i As Long, s As String
+    If CStr(v(r, cols(0))) = "" Then Exit Function
+    For i = 0 To UBound(cols)
+        If i > 0 Then s = s & "|"
+        s = s & DateKey(v(r, cols(i)))
+    Next i
+    RowKey = s
+End Function
 
 ' シートの表の列で、条件に合うセルの数（表が空・見つからなければ 0）
 Private Function CountColumn(sheetName As String, tableName As String, col As String, crit As String) As Long

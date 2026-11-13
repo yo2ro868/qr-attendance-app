@@ -6,7 +6,7 @@ Option Explicit
 ' 調整には、休暇等シートの本年使用の調整に、Forms で申請して承認された年次休暇（休暇申請シートには書かれない分）を足して書く。
 '   ［休暇申請シートを作成］… 職員名簿の全員について、まだない人の休暇申請シートをひな形から作る（あれば作らない・上書きしない）
 '   ［休暇申請シートを更新］… 作成先にある全員の休暇申請シートの「管理」シートを、休暇等シートの今の値に書き換える
-'   ［様式を移行］…… 様式の古い休暇申請シートを、書いてある申請の行と超過勤務等命令簿の月のシートを残して新しいひな形の様式にする
+'   ［様式を移行］…… 様式の古い休暇申請シートを、書いてある申請の行と超過勤務等命令簿の月のシート・フレックスの申告と割振りを残して新しいひな形の様式にする
 '   ［超過勤務の月を追加］… 作成先にある全員の休暇申請シートに、B7 の月の超過勤務等命令簿のシート（超勤 R8.12 など）を作る
 
 Private Const DAY_MIN As Double = 465     ' 年次休暇の1日＝7時間45分＝465分
@@ -15,6 +15,12 @@ Private Const LEAVE_LAST As Long = 1001   ' 出勤・休暇管理データ の�
 ' 超過勤務等命令簿の月のシート：本人・所属長が書く欄（様式を移行するとき、月のシートの値をこの範囲だけ写す）と、ひな形のシートの名前
 Private Const OT_INPUTS As String = "A5:B66,D5:I66,K5:L66,Y5:AA66,AC5:AE66,L69:O71,AC69:AE70,BH1"
 Private Const OT_TEMPLATE As String = "超勤ひな形"
+' フレックスタイム制のシート：本人・所属長が書く欄（様式を移行するとき、式でないセルを空欄も含めて写す。
+' 既定の時刻は式なので、本人が消した欄（勤務しない日）は空欄のまま写す）
+Private Const FLEX_SIN As String = "フレックス申告"
+Private Const FLEX_SIN_INPUTS As String = "D3,H12:Z403,AN12:AN25"
+Private Const FLEX_WARI As String = "フレックス割振り"
+Private Const FLEX_WARI_INPUTS As String = "D3,D4,AO12:AP25"
 
 ' 出勤・休暇管理データ から読んだ値
 Private staff As Variant      ' 職員名簿 A:B（出勤用ID・氏名）
@@ -254,6 +260,66 @@ Private Function WriteOvertimeInputs(wb As Workbook, months As Collection) As Lo
     Next i
 End Function
 
+' フレックスのシートの書いた欄を読む：(シート名, 番地, 式か値の2次元配列) の一覧。シートがなければ空
+Private Function ReadFlexInputs(wb As Workbook) As Collection
+    Dim result As New Collection, spec As Variant, ws As Worksheet, area As Range
+    For Each spec In Array(Array(FLEX_SIN, FLEX_SIN_INPUTS), Array(FLEX_WARI, FLEX_WARI_INPUTS))
+        Set ws = SheetByName(wb, CStr(spec(0)))
+        If Not ws Is Nothing Then
+            For Each area In ws.Range(CStr(spec(1))).Areas
+                result.Add Array(CStr(spec(0)), area.Address(False, False), AreaInputs(area))
+            Next area
+        End If
+    Next spec
+    Set ReadFlexInputs = result
+End Function
+
+' 範囲の各セル：式なら Empty（新しい様式の式を使う）、式でなければ値（空欄は ""）を、2次元配列で
+Private Function AreaInputs(area As Range) As Variant
+    Dim f As Variant, v As Variant, out() As Variant, i As Long, j As Long
+    ReDim out(1 To area.Rows.Count, 1 To area.Columns.Count)
+    For i = 1 To area.Rows.Count
+        For j = 1 To area.Columns.Count
+            With area.Cells(i, j)
+                If .HasFormula Then
+                    out(i, j) = Empty
+                ElseIf IsError(.Value2) Then
+                    out(i, j) = Empty
+                Else
+                    out(i, j) = .Value2
+                    If IsEmpty(out(i, j)) Then out(i, j) = ""
+                End If
+            End With
+        Next j
+    Next i
+    AreaInputs = out
+End Function
+
+' 読んでおいたフレックスの欄を新しい様式に書く（式でなかったセルだけ。空欄は空にする）。書いたセルの数を返す
+Private Function WriteFlexInputs(wb As Workbook, items As Collection) As Long
+    Dim item As Variant, ws As Worksheet, area As Range, f As Variant, i As Long, j As Long, vals As Variant, one As Variant
+    For Each item In items
+        Set ws = SheetByName(wb, CStr(item(0)))
+        If Not ws Is Nothing Then
+            ws.Unprotect
+            Set area = ws.Range(CStr(item(1)))
+            vals = item(2)
+            If area.Cells.Count = 1 Then
+                If Not IsEmpty(vals(1, 1)) Then area.Value2 = vals(1, 1): WriteFlexInputs = WriteFlexInputs + 1
+            Else
+                f = area.Formula
+                For i = 1 To area.Rows.Count
+                    For j = 1 To area.Columns.Count
+                        If Not IsEmpty(vals(i, j)) Then f(i, j) = vals(i, j): WriteFlexInputs = WriteFlexInputs + 1
+                    Next j
+                Next i
+                area.Formula = f
+            End If
+            ws.Protect DrawingObjects:=True, Contents:=True, Scenarios:=True, AllowFormattingColumns:=True, AllowFormattingRows:=True
+        End If
+    Next item
+End Function
+
 ' 様式の古い休暇申請シートを新しい様式にする。元のファイルは控えのフォルダに複製してから、同じファイルに上書きする
 ' （別のファイルに置き換えると OneDrive の共有リンクが切れるため）。quiet が True のときはメッセージを出さない
 Public Sub MigrateAll(ByVal quiet As Boolean)
@@ -341,6 +407,7 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
     cols = Array("申請日", "休暇の種類", "種別・内容", "単位", "開始日", "終了日", "開始時刻", "終了時刻", _
                  "事由", "承認（所属長）", "承認日", "所属長コメント")
     Dim wb As Workbook, lo As ListObject, vals() As Variant, hasValue() As Boolean, otMonths As Collection, otCount As Long
+    Dim flexItems As Collection, flexCount As Long
     On Error GoTo Failed
 
     ' 古いファイルから読む（式の入ったセルは、新しい様式の式に任せるので写さない）
@@ -377,6 +444,7 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
         Next r
     End If
     Set otMonths = ReadOvertimeInputs(wb)      ' 超過勤務等命令簿の月のシートの書いた値
+    Set flexItems = ReadFlexInputs(wb)         ' フレックスの申告・割振りの書いた欄
     wb.Close SaveChanges:=False
     Set wb = Nothing
 
@@ -419,10 +487,11 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
     Next r
     rowCount = target
     otCount = WriteOvertimeInputs(wb, otMonths)
+    flexCount = WriteFlexInputs(wb, flexItems)
     Application.Calculation = xlCalculationAutomatic
     wb.Close SaveChanges:=True
     Set wb = Nothing
-    MigrateOne = "移行しました（申請 " & rowCount & " 行、超過勤務の月 " & otCount & "）。元のファイルの控え：" & backupDir & fileName
+    MigrateOne = "移行しました（申請 " & rowCount & " 行、超過勤務の月 " & otCount & IIf(flexItems.Count > 0, "、フレックスの欄 " & flexCount, "") & "）。元のファイルの控え：" & backupDir & fileName
     If noClock > 0 Then MigrateOne = MigrateOne & "【時刻がなく時間だけの行が " & noClock & " 行あります。開始時刻・終了時刻を入れてください（赤くなっています）】"
     Exit Function
 Failed:

@@ -60,7 +60,8 @@ AUTO_COUNT_ROW, AUTO_HEAD = 6, 8
 AUTO_FIRST = AUTO_HEAD + 1
 AU_Y, AU_M, AU_D = "A", "E", "S"     # 年休_自動（キー・分・Forms分）、月別_自動（キー・1〜12月）、日別_自動（キー・8欄）のキーの列
 AU_T = "AD"                           # テレワーク_日別（キー・表示・備考）のキーの列
-AUTO_TABLES = {"年休_自動": AU_Y, "月別_自動": AU_M, "日別_自動": AU_D, "テレワーク_日別": AU_T}
+AU_F = "AH"                           # フレックス_出勤簿（キー・表示）のキーの列
+AUTO_TABLES = {"年休_自動": AU_Y, "月別_自動": AU_M, "日別_自動": AU_D, "テレワーク_日別": AU_T, "フレックス_出勤簿": AU_F}
 TW = "'テレワーク一覧'"                # テレワーク一覧シート：B2 がテレワーク予定表のフォルダ、表は TW_HEAD 行目から（add_queries.ps1 が作る）
 TW_HEAD = 5
 
@@ -381,6 +382,7 @@ KIND_COLS = (3, 7)              # TABLE のうち特別休暇（種別）・職�
 HID_COUNT, HID = "AB", "AC"     # 隠し列：AB=その日の登録件数、AC=照合キー・名簿の行位置・対象月の1日
 HID_DAY = "AD"                  # 隠し列：その日の申請（日別_自動）の行位置
 HID_TELE = "AA"                 # 隠し列：その日のテレワークの予定（テレワーク_日別）の行位置
+HID_FLEX = "AG"                 # 隠し列：その日のフレックスの割振り（フレックス_出勤簿）の行位置
 MIN_FIRST_COL = 34              # 隠し列 AH〜AS：出勤簿の上の欄の各月・累計の分
 CTRL_L, CTRL_V = "AE", "AF"     # 印刷範囲の外：対象年月・出勤用ID などの指定欄
 wrap = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -393,7 +395,7 @@ def setup_report_sheet(ws):
     ws.column_dimensions["B"].width = 4.5
     for col in SUB:
         ws.column_dimensions[col].width = SUB_W
-    for col in [HID_TELE, HID_COUNT, HID, HID_DAY] + [get_column_letter(MIN_FIRST_COL + i) for i in range(12)]:
+    for col in [HID_TELE, HID_COUNT, HID, HID_DAY, HID_FLEX] + [get_column_letter(MIN_FIRST_COL + i) for i in range(12)]:
         ws.column_dimensions[col].width = 8
         ws.column_dimensions[col].hidden = True
     ws.column_dimensions[CTRL_L].width = 12
@@ -568,7 +570,11 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
         ws[f"{HID_TELE}{r}"] = f'=IF(OR({P1}="",A{r}=""),"",{auto_match(day_key, AU_T)})'
         ws[f"C{r}"] = (f'=IF(N({HID_COUNT}{r})=0,"","○")'
                        f'&IF({HID_TELE}{r}="","",INDEX({auto_col(col_after(AU_T, 1))},{HID_TELE}{r})&"")')
-        ws[f"{SPANS[-1][0]}{r}"] = f'=IF({HID_TELE}{r}="","",INDEX({auto_col(col_after(AU_T, 2))},{HID_TELE}{r})&"")'
+        # 備考：時間のテレワークの時刻と、フレックスの割振り（取り込んだ承認済みの内容。隠し列 AG がフレックス_出勤簿の行位置）
+        ws[f"{HID_FLEX}{r}"] = f'=IF(OR({P1}="",A{r}=""),"",{auto_match(day_key, AU_F)})'
+        tele_note = f'IF({HID_TELE}{r}="","",INDEX({auto_col(col_after(AU_T, 2))},{HID_TELE}{r})&"")'
+        flex_note = f'IF({HID_FLEX}{r}="","",INDEX({auto_col(col_after(AU_F, 1))},{HID_FLEX}{r})&"")'
+        ws[f"{SPANS[-1][0]}{r}"] = f'=TRIM({flex_note}&" "&{tele_note})'
         ws[f"{SPANS[-1][0]}{r}"].font = Font(name=FONT, size=8)
         # 年次休暇〜職専免（時間）の欄（TABLE の 1〜8 番目）は、休暇申請シートの承認済みの申請から表示する
         ws[f"{HID_DAY}{r}"] = f'=IF(OR({P1}="",A{r}=""),"",{auto_match(day_key, AU_D)})'
@@ -576,7 +582,7 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
             acol = col_after(AU_D, k)           # 日別_自動の k 番目の欄の列
             ws[f"{SPANS[k][0]}{r}"] = (f'=IF({HID_DAY}{r}="","",INDEX({auto_col(acol)},{HID_DAY}{r})&"")')
         ws.row_dimensions[r].height = 19
-    ws[f"A{hr + 32}"] = "※ 出勤欄の○は出勤管理システムの記録（QRコードの読み取りによる出勤登録）、「テレ」は所属長のテレワーク予定表によります。"
+    ws[f"A{hr + 32}"] = "※ 出勤欄の○は出勤管理システムの記録（QRコードの読み取りによる出勤登録）、「テレ」は所属長のテレワーク予定表によります。備考の「フ」「割振なし」はフレックスの割振り（承認済み）です。"
     ws[f"A{hr + 32}"].font = f_note
 
 
@@ -772,7 +778,7 @@ ws["L5"] = "目次の［最新を読み込む］（またはこのシートの�
 ws["L5"].font = f_note
 ws.column_dimensions["B"].width = 16
 for col, label in zip(AUTO_TABLES.values(), ["年次休暇（出勤用ID|年 ごとの使用・分）", "病気休暇・看護休暇（月ごと）", "出勤簿の日ごとの欄",
-                                              "テレワーク（出勤簿の出勤欄・備考）"]):
+                                              "テレワーク（出勤簿の出勤欄・備考）", "フレックス（出勤簿の備考）"]):
     ws[f"{col}{AUTO_HEAD - 1}"] = label
     ws[f"{col}{AUTO_HEAD - 1}"].font = f_bold
     # 6行目：表の行数（出勤簿などがこの行数の範囲だけを探す。式は add_queries.ps1 が入れる）
@@ -782,6 +788,7 @@ ws.column_dimensions["A"].width = 18
 ws.column_dimensions[AU_M].width = 22
 ws.column_dimensions[AU_D].width = 18
 ws.column_dimensions[AU_T].width = 18
+ws.column_dimensions[AU_F].width = 18
 wb.defined_names["フォルダ"] = DefinedName("フォルダ", attr_text=f"{AU}!$B$2")
 wb.defined_names["Forms申請ファイル"] = DefinedName("Forms申請ファイル", attr_text=f"{AU}!$B$3")
 wb.defined_names["Forms承認ファイル"] = DefinedName("Forms承認ファイル", attr_text=f"{AU}!$B$4")
@@ -833,6 +840,22 @@ ws["A1"] = ("休暇申請シートの超過勤務等命令簿を読んだ今の�
             "左が1人1か月の計と所属長の確認、右（AG 列から）が日ごとの行です。")
 ws["A1"].font = f_note
 
+# ===== フレックスタイム制（休暇申請シートのフレックス申告・割振り。tools/flex） =====
+# フレックス：単位期間ごとの状況（今の内容）と取り込み・注意（Power Query の表 フレックス一覧）
+# フレックスの日別：所属長の承認済みの単位期間を［最新を読み込む］で写した日ごとの行（値。照合の列だけは式）
+# フレックスの読み込み：休暇申請シートのフレックスの表を読んだ今の内容（承認待ちも含む）。表はどれも add_queries.ps1 が作る
+ws = wb.create_sheet("フレックス")
+ws["A1"] = ("フレックスタイム制で勤務する人の単位期間（4週間）ごとの状況です（休暇申請シートの今の内容）。所属長が承認した単位期間は、"
+            "［最新を読み込む］で「フレックスの日別」に取り込みます（取り込み：取り込み済み）。「注意」の列に確かめることが出ます。")
+ws["A1"].font = f_note
+ws = wb.create_sheet("フレックスの日別")
+ws["A1"] = ("取り込んだ承認済みの単位期間の日ごとの割振りです（あとで申告が書き換えられても変わりません。承認し直すと取り込み直します）。"
+            "「注意」の列に、今日より前の日で、出勤の記録（QR・テレワーク）がない勤務日などが出ます。")
+ws["A1"].font = f_note
+ws = wb.create_sheet("フレックスの読み込み")
+ws["A1"] = "休暇申請シートのフレックスの申告・割振りを読んだ今の内容です（承認待ちも含む。目次の［最新を読み込む］で最新になります）。"
+ws["A1"].font = f_note
+
 # ===== 目次（先頭のシート）：作業の流れごとに、行くシートとボタンと今の状況 =====
 # E 列の「[ボタン]マクロ名|表示」は add_buttons.ps1 がボタンにする。F 列の「[式]=…」は表（Power Query の表など）を指す式なので、
 # 表ができたあとで add_buttons.ps1 が式にする（openpyxl では表の名前を使った式を書けないため）
@@ -848,7 +871,7 @@ ws["B2"] = "上から順に作業します。シート名を押すとそのシ�
 ws["B2"].font = f_note
 GROUPS = [   # （まとまり, 見出しの色, [(番号, 作業, シート, 行き先のセル, ボタン, 状況の式)])
     ("最新の内容を読み込む（作業の前に）", "1E3A5F", [
-        ("", "休暇申請シート・Forms・テレワーク予定表・超過勤務等命令簿を読み直します（1分ほどかかります）", "", "", "ImportRequests|最新を読み込む",
+        ("", "休暇申請シート・Forms・テレワーク予定表・超過勤務等命令簿・フレックスを読み直し、承認済みのフレックスを取り込みます（1分ほどかかります）", "", "", "ImportRequests|最新を読み込む",
          "='休暇申請シートの読み込み'!B5"),
     ]),
     ("毎月の出勤簿", "2E75B6", [
@@ -863,11 +886,13 @@ GROUPS = [   # （まとまり, 見出しの色, [(番号, 作業, シート, �
         ("2", "年次休暇の残り・本年分・調整を確かめる（年が変わったら新しい年の行を足す）", "休暇等", "A1", "", ""),
         ("3", "休暇申請シートの場所・Forms の回答の場所（最初に一度）", "休暇申請シートの読み込み", "B2", "", ""),
     ]),
-    ("テレワーク・超過勤務", "C55A11", [
+    ("テレワーク・超過勤務・フレックス", "C55A11", [
         ("1", "テレワークの予定と注意を確かめる", "テレワーク一覧", "A5", "", "[式]=COUNTIF(テレワーク一覧[注意],\"?*\")"),
         ("2", "超過勤務等命令簿の所属長の確認の状況を見る", "超過勤務の読み込み", "A3", "", "[式]=COUNTIF(超勤_月[状況],\"確認待ち\")"),
         ("3", "月を B2 に入れて、確認済みの月を写す（月1回）", "超過勤務", "B2", "TransferOvertime|超過勤務を転記", ""),
         ("4", "写した日ごとの行の注意を確かめる", "超過勤務の日別", "A3", "", "[式]=COUNTIF(転記_日別[注意],\"?*\")"),
+        ("5", "フレックスの単位期間の承認の状況と注意を確かめる", "フレックス", "A3", "", "[式]=COUNTIF(フレックス一覧[注意],\"?*\")"),
+        ("6", "取り込んだフレックスの割振りと照合の注意を確かめる", "フレックスの日別", "A3", "", "[式]=COUNTIF(確定_フレックス日別[注意],\"?*\")"),
     ]),
     ("台帳（変わったときに）", "7F7F7F", [
         ("1", "職員名簿（出勤用ID・氏名・メール・休憩の特例）", "職員名簿", "A2", "", '=COUNTIF(計算用!B2:B501,"重複")'),
@@ -877,7 +902,8 @@ GROUPS = [   # （まとまり, 見出しの色, [(番号, 作業, シート, �
 ]
 STATUS_LABEL = {"休暇申請シートの読み込み'!B5": "前回の読み込み", "★名簿に未登録": "名簿に未登録 {} 件",
                 "承認待ち": "承認待ち {} 件", "テレワーク一覧[注意]": "注意 {} 件", "確認待ち": "確認待ち {} 人・月",
-                "転記_日別[注意]": "注意 {} 日", "重複": "ID の重複 {} 件"}
+                "転記_日別[注意]": "注意 {} 日", "フレックス一覧[注意]": "注意 {} 件", "確定_フレックス日別[注意]": "注意 {} 日",
+                "重複": "ID の重複 {} 件"}
 TAB_COLORS = {}
 r = 4
 for title, color, items in GROUPS:
@@ -928,6 +954,7 @@ ws.cell(row=r + 2, column=2, value="このファイルを開いただけでは�
 ORDER = ["目次", "出力データ貼付", "照合結果", "月次一覧", "出勤簿", "一括印刷",
          "申請一覧", "休暇等", "休暇申請シートの読み込み",
          "テレワーク一覧", "超過勤務の読み込み", "超過勤務", "超過勤務の日別",
+         "フレックス", "フレックスの日別", "フレックスの読み込み",
          "職員名簿", "祝日", "使い方", "計算用"]
 assert sorted(ORDER) == sorted(s.title for s in wb.worksheets), [s.title for s in wb.worksheets]
 wb._sheets = [wb[name] for name in ORDER]

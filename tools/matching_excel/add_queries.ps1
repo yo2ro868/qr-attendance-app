@@ -22,6 +22,7 @@ $helpers = [ordered]@{
     'Forms申請'      = Join-Path $queries 'Forms申請.pq'
     '申請データ'     = Join-Path $queries '申請データ.pq'
     'テレワーク予定表' = Join-Path $teleworkQueries 'テレワーク予定表.pq'
+    'フレックス_確定' = Join-Path $queries 'フレックス_確定.pq'     # 表 確定_フレックス日別（下で作る）を読む
 }
 # 超過勤務の支給割合ごとの時間の列（超勤_日別.pq・超勤_月.pq と同じ）と、手当対象時間の列
 $otBuckets = @('125', '150', '150（60H前）', '150（+25）', '150（+15）', '135', '160', '175', '175（+25）', '175（+15）',
@@ -39,6 +40,10 @@ $loaded = [ordered]@{
     # 超過勤務等命令簿（休暇申請シートの月のシート）：1人1か月の計と確認、日ごとの行
     '超勤_月'   = @{ Sheet = '超過勤務の読み込み'; At = 'A3'; Count = ''; Time = ($otBuckets + $otAllowance + @('60時間超（+25）', '60時間超（+15）')); Date = @('確認日') }
     '超勤_日別' = @{ Sheet = '超過勤務の読み込み'; At = 'AG3'; Count = ''; Time = (@('登庁時刻', '退庁時刻', '休憩時間') + $otBuckets); Date = @('確認日', '日付') }
+    # フレックスタイム制（休暇申請シートのフレックス申告・割振り）：今の内容（日ごと）、単位期間ごとの状況と取り込み、出勤簿の備考
+    'フレックス_日別' = @{ Sheet = 'フレックスの読み込み'; At = 'A3'; Count = ''; Time = @('勤務開始', '勤務終了', '休憩', '勤務時間'); Date = @('期間の開始日', '日付', '申告年月日', '割振年月日') }
+    'フレックス一覧'  = @{ Sheet = 'フレックス'; At = 'A3'; Count = ''; Time = @('合計'); Date = @('開始日', '終了日', '申告年月日', '割振年月日') }
+    'フレックス_出勤簿' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AH8'; Count = 'AH6'; Time = @(); Date = @() }
 }
 $settings = @{ 'B2' = $Folder; 'B3' = $FormsRequest; 'B4' = $FormsApproval }
 
@@ -69,7 +74,7 @@ try {
         $qt.CommandText = "SELECT * FROM [$name]"
         $qt.BackgroundQuery = $false
         $qt.PreserveFormatting = $true
-        $qt.AdjustColumnWidth = ($name -eq '申請一覧' -or $name -like '超勤_*')
+        $qt.AdjustColumnWidth = ($name -eq '申請一覧' -or $name -like '超勤_*' -or ($name -like 'フレックス*' -and $name -ne 'フレックス_出勤簿'))
         $qt.Refresh($false) | Out-Null
         # 開いたときには読み直さない（全部のクエリを読み直すと、読む場所が空でも1分ほどかかるため）。
         # 目次などの［最新を読み込む］（ImportRequests）を押したときに読み直す
@@ -98,31 +103,40 @@ try {
         '休暇'       = "=IF([@出勤用ID]="""","""",IF($leaveRow="""","""",IF(COUNTIF(INDEX($au!`$T:`$AA,$leaveRow,0),""1日"")>0,""1日"",""時間"")))"
         '注意'       = '=IF([@出勤用ID]="","",IF(AND([@出勤の記録]="",[@登庁時刻]<>""),"出勤の記録（QR・テレワーク）がありません。","")&IF([@休暇]="1日","1日の休暇（承認済み）の日です。",IF([@休暇]="時間","時間単位の休暇（承認済み）があります（時刻を確かめてください）。","")))'
     }
-    foreach ($dst in @(@{ Sheet = '超過勤務'; At = 'A4'; From = '超勤_月'; Name = '転記_月計'; Checks = $false },
-                       @{ Sheet = '超過勤務の日別'; At = 'A3'; From = '超勤_日別'; Name = '転記_日別'; Checks = $true })) {
+    # フレックス：承認済みの単位期間を写した日ごとの行の照合（今日より前の日だけ）
+    $flexChecks = [ordered]@{
+        '出勤の記録' = $checks['出勤の記録']
+        '休暇'       = $checks['休暇']
+        '注意'       = '=IF(OR([@出勤用ID]="",[@日付]="",[@日付]>=TODAY()),"",IF(AND([@区分]="平日",N([@勤務時間])>0,[@出勤の記録]="",[@休暇]<>"1日"),"勤務を割り振った日ですが、出勤の記録（QR・テレワーク）も1日の休暇もありません。","")&IF(AND([@区分]="平日",N([@勤務時間])=0,ISNUMBER(SEARCH("QR",[@出勤の記録]))),"勤務時間を割り振らない日に QR の出勤登録があります。","")&IF(AND([@区分]="週休日",N([@勤務時間])>0),"週休日に勤務を割り振っています。",""))'
+    }
+    foreach ($dst in @(@{ Sheet = '超過勤務'; At = 'A4'; From = '超勤_月'; Name = '転記_月計'; Checks = $null; Stamp = '転記日時' },
+                       @{ Sheet = '超過勤務の日別'; At = 'A3'; From = '超勤_日別'; Name = '転記_日別'; Checks = $checks; Stamp = '転記日時' },
+                       @{ Sheet = 'フレックスの日別'; At = 'A3'; From = 'フレックス_日別'; Name = '確定_フレックス日別'; Checks = $flexChecks; Stamp = '確定日時' })) {
         $ws = $wb.Worksheets.Item($dst.Sheet)
-        $srcLo = $wb.Worksheets.Item('超過勤務の読み込み').ListObjects.Item($dst.From)
-        $heads = @($srcLo.HeaderRowRange.Cells | ForEach-Object { [string]$_.Value2 }) + @('転記日時')
-        if ($dst.Checks) { $heads += @($checks.Keys) }
+        $srcSheet = $loaded[$dst.From].Sheet
+        $srcLo = $wb.Worksheets.Item($srcSheet).ListObjects.Item($dst.From)
+        $heads = @($srcLo.HeaderRowRange.Cells | ForEach-Object { [string]$_.Value2 }) + @($dst.Stamp)
+        if ($dst.Checks) { $heads += @($dst.Checks.Keys) }
         $top = $ws.Range($dst.At)
         for ($i = 0; $i -lt $heads.Count; $i++) { $ws.Cells.Item($top.Row, $top.Column + $i).Value2 = [string]$heads[$i] }
         $rng = $ws.Range($top, $ws.Cells.Item($top.Row + 1, $top.Column + $heads.Count - 1))
         $lo = $ws.ListObjects.Add(1, $rng, $null, 1)
         $lo.Name = $dst.Name
         $lo.TableStyle = 'TableStyleLight9'
-        if ($dst.Checks) { foreach ($k in $checks.Keys) { $lo.ListColumns.Item($k).DataBodyRange.Formula = $checks[$k] } }
+        if ($dst.Checks) { foreach ($k in $dst.Checks.Keys) { $lo.ListColumns.Item($k).DataBodyRange.Formula = $dst.Checks[$k] } }
         # 書式：読み込んだ表と同じ列に時間・日付、転記日時。出勤用ID・年月は文字
         $first = $top.Row + 1
         $spec = $loaded[$dst.From]
-        foreach ($pair in @(@($spec.Time, '[h]:mm'), @($spec.Date, 'yyyy/m/d'), @(@('転記日時'), 'yyyy/m/d h:mm'), @(@('出勤用ID', '年月'), '@'))) {
+        foreach ($pair in @(@($spec.Time, '[h]:mm'), @($spec.Date, 'yyyy/m/d'), @(@($dst.Stamp), 'yyyy/m/d h:mm'), @(@('出勤用ID', '年月'), '@'))) {
             foreach ($col in $pair[0]) {
+                if (-not ($heads -contains $col)) { continue }
                 $c = $lo.ListColumns.Item($col).Range.Column
                 $ws.Columns.Item($c).NumberFormat = $pair[1]
             }
         }
         if ($dst.Checks) { $lo.ListColumns.Item('注意').Range.ColumnWidth = 60 }
         foreach ($col in @($spec.Date)) { $lo.ListColumns.Item($col).Range.ColumnWidth = 11 }
-        $lo.ListColumns.Item('転記日時').Range.ColumnWidth = 16
+        $lo.ListColumns.Item($dst.Stamp).Range.ColumnWidth = 16
         $lo.ListColumns.Item('ファイル名').Range.ColumnWidth = 12
     }
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = '' } }
