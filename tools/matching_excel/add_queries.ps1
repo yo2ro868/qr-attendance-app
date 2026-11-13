@@ -1,9 +1,9 @@
-﻿# 出勤・休暇管理データ に Power Query を入れる：休暇申請シート（tools/leave_sheet）のフォルダと、Forms の休暇申請・休暇承認の回答の Excel を読み、
+﻿# 出勤・休暇管理データ に Power Query を入れる：休暇申請シート（tools/leave_sheet）のフォルダ・テレワーク予定表などを読み、
 # 「休暇申請シートの読み込み」シートに 年休_自動・月別_自動・日別_自動 の表を、「申請一覧」シートに申請一覧の表を作る。開いたときに読み直す設定にする。
-# 使い方：add_queries.ps1 -Path 出勤・休暇管理データ.xlsx [-Folder 休暇申請シートのフォルダ] [-FormsRequest 申請の回答.xlsx] [-FormsApproval 承認の回答.xlsx]
+# 使い方：add_queries.ps1 -Path 出勤・休暇管理データ.xlsx [-Folder 休暇申請シートのフォルダ]
 #   -Folder などを付けると、それを読んだ状態で保存する（確認用）。付けなければ設定欄は空欄のまま。
 #   -TeleworkFolder はテレワーク予定表（tools/telework）のフォルダ。テレワーク一覧シートと、出勤簿の「テレ」に使う。
-param([Parameter(Mandatory = $true)][string]$Path, [string]$Folder = '', [string]$FormsRequest = '', [string]$FormsApproval = '', [string]$TeleworkFolder = '')
+param([Parameter(Mandatory = $true)][string]$Path, [string]$Folder = '', [string]$TeleworkFolder = '')
 
 $ErrorActionPreference = 'Stop'
 $Path = [IO.Path]::GetFullPath($Path)
@@ -15,11 +15,7 @@ $helpers = [ordered]@{
     '休暇申請シート'       = Join-Path $sheetQueries '休暇申請シート.pq'
     '祝日の日付'     = Join-Path $queries '祝日の日付.pq'
     '職員名簿_メール' = Join-Path $queries '職員名簿_メール.pq'
-    'Forms回答_申請' = Join-Path $queries 'Forms回答_申請.pq'
-    'Forms回答_承認' = Join-Path $queries 'Forms回答_承認.pq'
     '申請データ_用紙' = Join-Path $sheetQueries '申請データ.pq'
-    'Forms承認'      = Join-Path $queries 'Forms承認.pq'
-    'Forms申請'      = Join-Path $queries 'Forms申請.pq'
     '申請データ'     = Join-Path $queries '申請データ.pq'
     'テレワーク予定表' = Join-Path $teleworkQueries 'テレワーク予定表.pq'
     'フレックス_確定' = Join-Path $queries 'フレックス_確定.pq'     # 表 確定_フレックス日別（下で作る）を読む
@@ -44,8 +40,14 @@ $loaded = [ordered]@{
     'フレックス_日別' = @{ Sheet = 'フレックスの読み込み'; At = 'A3'; Count = ''; Time = @('勤務開始', '勤務終了', '休憩', '勤務時間'); Date = @('期間の開始日', '日付', '申告年月日', '割振年月日') }
     'フレックス一覧'  = @{ Sheet = 'フレックス'; At = 'A3'; Count = ''; Time = @('合計'); Date = @('開始日', '終了日', '申告年月日', '割振年月日') }
     'フレックス_出勤簿' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AH8'; Count = 'AH6'; Time = @(); Date = @() }
+    # 利用予定シート（フレックス／テレワーク利用予定）の日ごとの文字：休暇・テレワーク・フレックスの勤務開始
+    # テレワーク実施報告（休暇申請シートのテレワーク報告）：全員の報告と所属長の確認・注意
+    'テレワーク報告一覧' = @{ Sheet = 'テレワーク報告'; At = 'A3'; Count = ''; Time = @('開始時刻', '終了時刻', '時間'); Date = @('提出日', '実施日', '確認日') }
+    '利用予定_日別' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AK8'; Count = 'AK6'; Time = @(); Date = @() }
 }
-$settings = @{ 'B2' = $Folder; 'B3' = $FormsRequest; 'B4' = $FormsApproval }
+$settings = @{ 'B2' = $Folder }
+# 折り返して表示する長い文の列と、その幅
+$wrapWidth = @{ '注意' = 50; '確認' = 40; '業務内容' = 40; '備考' = 24; '所属長コメント' = 20; '事由' = 20; '休憩の時刻' = 22; '状態' = 22 }
 
 $xl = New-Object -ComObject Excel.Application
 $xl.DisplayAlerts = $false
@@ -74,8 +76,20 @@ try {
         $qt.CommandText = "SELECT * FROM [$name]"
         $qt.BackgroundQuery = $false
         $qt.PreserveFormatting = $true
-        $qt.AdjustColumnWidth = ($name -eq '申請一覧' -or $name -like '超勤_*' -or ($name -like 'フレックス*' -and $name -ne 'フレックス_出勤簿'))
+        $qt.AdjustColumnWidth = ($name -eq '申請一覧' -or $name -eq 'テレワーク報告一覧' -or $name -eq 'テレワーク一覧' -or $name -like '超勤_*' -or ($name -like 'フレックス*' -and $name -ne 'フレックス_出勤簿'))
         $qt.Refresh($false) | Out-Null
+        # 長い文の列は幅を決めて折り返す（読み直すたびに列の幅を変えない。行の高さは［最新を読み込む］のマクロが合わせる）
+        $qt.AdjustColumnWidth = $false
+        foreach ($lc in @($lo.ListColumns)) {
+            # 読み込む前でも、名前・日付・ファイル名などが入る幅にしておく（読み込んだあとは［最新を読み込む］のマクロが中身に合わせる）
+            $col = $ws.Columns.Item($lc.Range.Column)
+            $min = if ($lc.Name -eq 'ファイル名') { 34 } elseif ($lc.Name -in @('氏名', '所属')) { 14 } else { 11 }
+            if ($col.ColumnWidth -lt $min) { $col.ColumnWidth = [double]$min }
+            if ($wrapWidth.ContainsKey($lc.Name)) {
+                $ws.Columns.Item($lc.Range.Column).ColumnWidth = [double]$wrapWidth[$lc.Name]
+                $ws.Columns.Item($lc.Range.Column).WrapText = $true
+            }
+        }
         # 開いたときには読み直さない（全部のクエリを読み直すと、読む場所が空でも1分ほどかかるため）。
         # 目次などの［最新を読み込む］（ImportRequests）を押したときに読み直す
         $lo.QueryTable.WorkbookConnection.OLEDBConnection.RefreshOnFileOpen = $false
@@ -134,10 +148,17 @@ try {
                 $ws.Columns.Item($c).NumberFormat = $pair[1]
             }
         }
-        if ($dst.Checks) { $lo.ListColumns.Item('注意').Range.ColumnWidth = 60 }
-        foreach ($col in @($spec.Date)) { $lo.ListColumns.Item($col).Range.ColumnWidth = 11 }
+        # 見出しが入る幅に広げる（もとの幅より狭くはしない）
+        foreach ($lc in @($lo.ListColumns)) {
+            $col = $ws.Columns.Item($lc.Range.Column)
+            $before = $col.ColumnWidth
+            [void]$lc.Range.Columns.AutoFit()
+            if ($col.ColumnWidth -lt $before) { $col.ColumnWidth = $before }
+        }
+        if ($dst.Checks) { $lo.ListColumns.Item('注意').Range.ColumnWidth = 50; $lo.ListColumns.Item('注意').Range.WrapText = $true }
+        foreach ($col in @($spec.Date)) { $r0 = $lo.ListColumns.Item($col).Range; if ($r0.ColumnWidth -lt 11) { $r0.ColumnWidth = 11 } }
         $lo.ListColumns.Item($dst.Stamp).Range.ColumnWidth = 16
-        $lo.ListColumns.Item('ファイル名').Range.ColumnWidth = 12
+        $lo.ListColumns.Item('ファイル名').Range.ColumnWidth = 34
     }
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = '' } }
     if ($TeleworkFolder) { $tw.Range('B2').Value2 = '' }

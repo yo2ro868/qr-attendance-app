@@ -99,7 +99,7 @@ for i, (label, _, fmt, fill) in enumerate(COLS, start=1):
         c.alignment = left if label in ("氏名（確認用）", "備考", "確認") else center
         if fmt:
             c.number_format = fmt
-ws.row_dimensions[HEAD].height = 22
+ws.row_dimensions[HEAD].height = 30
 for r in range(FIRST, LAST + 1):
     a, b, c_, d, e, f, g, h = (f"{x}{r}" for x in "ABCDEFGH")
     # 時間：区分が「時間」で開始時刻・終了時刻があれば、その差から休憩（重なる分だけ）を引く

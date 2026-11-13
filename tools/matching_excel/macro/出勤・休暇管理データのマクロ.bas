@@ -1,6 +1,6 @@
 Attribute VB_Name = "MatchingMacro"
 Option Explicit
-' 出勤・休暇管理データ の［最新を読み込む］（目次）・［申請を取り込む］ボタン：休暇申請シート・Forms の回答・テレワーク予定表・
+' 出勤・休暇管理データ の［最新を読み込む］（目次）・［申請を取り込む］ボタン：休暇申請シート・テレワーク予定表・
 ' 超過勤務等命令簿・フレックスの申告と割振りを読み直し、休暇等・出勤簿・申請一覧・テレワーク一覧・超過勤務の読み込み・フレックスを最新にする（開いたときには読み直さない）。
 ' フレックスは、所属長の承認済みになった単位期間（フレックス一覧の取り込みが「取り込む」）を「フレックスの日別」に写す（承認時の内容として残す）。
 ' 読み込むのは保存された内容なので、同じ Excel で開いている休暇申請シートに未保存の変更があれば、先に保存するか聞く。
@@ -29,6 +29,7 @@ Public Sub ImportRequests()
     Application.StatusBar = "承認済みのフレックスを取り込んでいます..."
     flexTaken = TakeFlexSnapshot()
     ThisWorkbook.Worksheets("休暇申請シートの読み込み").Range("B5").Value = Now
+    FitRows
     Application.StatusBar = False
     Application.Cursor = xlDefault
 
@@ -261,6 +262,128 @@ Private Function RowKey(v As Variant, r As Long, cols() As Long) As String
     Next i
     RowKey = s
 End Function
+
+' ［利用予定を書き出す］（利用予定シート）：利用予定シートの表を、今日の日付の名前のシート（例 11月16日）に値で書き出す（配る用）。
+' 部・課は同じものが続く行を結合し、職員のいない行と、印刷範囲の外の列（隠し列・対象月の欄）とボタンは消す。前に書き出したシートは残す
+Public Sub MakeScheduleSheet()
+    Const FIRST_ROW As Long = 6, LAST_COL As String = "AH"
+    Dim src As Worksheet, ws As Worksheet, nm As String, n As Long, last As Long, r As Long, e As Long, c As Long
+    Set src = ThisWorkbook.Worksheets("利用予定")
+    If Not IsDate(src.Range("AN1").Value) Then
+        MsgBox "対象月を AN1 に入れてください（例 2026/11）。", vbExclamation
+        Exit Sub
+    End If
+    Application.Calculate
+    last = FIRST_ROW - 1 + WorksheetFunction.CountIf(src.Range("AK" & FIRST_ROW & ":AK" & (FIRST_ROW + 499)), "?*")
+    If last < FIRST_ROW Then
+        MsgBox "職員名簿に部が入っている人がいません（職員名簿の G 列に部、H 列に課を入れてください）。", vbExclamation
+        Exit Sub
+    End If
+    nm = Month(Date) & "月" & Day(Date) & "日"
+    n = 1
+    Do While Not SheetOf(nm & IIf(n > 1, "（" & n & "）", "")) Is Nothing
+        n = n + 1
+    Loop
+    If n > 1 Then nm = nm & "（" & n & "）"
+
+    On Error GoTo Failed
+    Application.ScreenUpdating = False
+    src.Copy After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
+    Set ws = ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count)
+    ws.Name = nm
+    ' 値にする
+    With ws.Range("A1:" & LAST_COL & (FIRST_ROW + 499))
+        .Copy
+        .PasteSpecial Paste:=xlPasteValues
+    End With
+    Application.CutCopyMode = False
+    ' 土日・祝日の列の色（条件付き書式は消すので、色を付けておく）
+    For c = 4 To 34
+        If IsDate(ws.Cells(4, c).Value) Then
+            If Weekday(ws.Cells(4, c).Value) = 1 Or Weekday(ws.Cells(4, c).Value) = 7 Or _
+               WorksheetFunction.CountIf(ThisWorkbook.Worksheets("祝日").Range("A2:A200"), ws.Cells(4, c).Value) > 0 Then
+                ws.Range(ws.Cells(4, c), ws.Cells(last, c)).Interior.Color = RGB(231, 230, 230)
+            End If
+        End If
+    Next c
+    ws.Cells.FormatConditions.Delete
+    ' 職員のいない行、隠し列と対象月の欄、ボタンを消す
+    If last < FIRST_ROW + 499 Then ws.Rows((last + 1) & ":" & (FIRST_ROW + 499)).Delete
+    ws.Range("AI:AN").Delete
+    Do While ws.Shapes.Count > 0
+        ws.Shapes(1).Delete
+    Loop
+    ' 部・課：同じものが続く行を結合
+    Application.DisplayAlerts = False
+    r = FIRST_ROW
+    Do While r <= last
+        e = r
+        Do While e + 1 <= last And CStr(ws.Cells(e + 1, 1).Value) = CStr(ws.Cells(r, 1).Value)
+            e = e + 1
+        Loop
+        MergeRun ws, 2, r, e
+        If e > r Then ws.Range(ws.Cells(r, 1), ws.Cells(e, 1)).Merge
+        r = e + 1
+    Loop
+    Application.DisplayAlerts = True
+    ws.PageSetup.PrintArea = "$A$1:$" & LAST_COL & "$" & last
+    ws.Activate
+    ws.Range("A1").Select
+    Application.ScreenUpdating = True
+    MsgBox "「" & nm & "」シートに書き出しました（" & (last - FIRST_ROW + 1) & " 人）。", vbInformation
+    Exit Sub
+Failed:
+    Application.CutCopyMode = False
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    MsgBox "書き出せませんでした：" & Err.Description, vbExclamation
+End Sub
+
+' r1〜r2 行の col 列で、同じ値が続く行を結合する（部の中の課）
+Private Sub MergeRun(ws As Worksheet, col As Long, r1 As Long, r2 As Long)
+    Dim r As Long, e As Long
+    r = r1
+    Do While r <= r2
+        e = r
+        Do While e + 1 <= r2 And CStr(ws.Cells(e + 1, col).Value) = CStr(ws.Cells(r, col).Value)
+            e = e + 1
+        Loop
+        If e > r Then ws.Range(ws.Cells(r, col), ws.Cells(e, col)).Merge
+        r = e + 1
+    Loop
+End Sub
+
+Private Function SheetOf(nm As String) As Worksheet
+    Dim s As Worksheet
+    For Each s In ThisWorkbook.Worksheets
+        If s.Name = nm Then Set SheetOf = s: Exit Function
+    Next s
+End Function
+
+' 一覧のシートの表を見やすくする：折り返しの列（注意・業務内容など。列全体が折り返し）は幅をそのままにし、ほかの列は中身に合わせて広げ
+' （狭くはしない。広すぎるときは60まで）、行の高さを折り返した文が見える高さに合わせる
+Private Sub FitRows()
+    Dim nm As Variant, ws As Worksheet, lo As ListObject, lc As ListColumn, w As Double
+    On Error Resume Next
+    For Each nm In Array("申請一覧", "テレワーク一覧", "テレワーク報告", "フレックス", "フレックスの日別", "フレックスの読み込み", _
+                         "超過勤務", "超過勤務の日別", "超過勤務の読み込み")
+        Set ws = Nothing
+        Set ws = ThisWorkbook.Worksheets(CStr(nm))
+        If Not ws Is Nothing Then
+            For Each lo In ws.ListObjects
+                For Each lc In lo.ListColumns
+                    If Not (lc.Range.WrapText = True) Then
+                        w = lc.Range.ColumnWidth
+                        lc.Range.Columns.AutoFit
+                        If lc.Range.ColumnWidth < w Then lc.Range.ColumnWidth = w
+                        If lc.Range.ColumnWidth > 60 Then lc.Range.ColumnWidth = 60
+                    End If
+                Next lc
+            Next lo
+            ws.UsedRange.Rows.AutoFit
+        End If
+    Next nm
+End Sub
 
 ' シートの表の列で、条件に合うセルの数（表が空・見つからなければ 0）
 Private Function CountColumn(sheetName As String, tableName As String, col As String, crit As String) As Long

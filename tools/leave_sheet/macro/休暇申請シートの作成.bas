@@ -3,7 +3,6 @@ Option Explicit
 ' 休暇申請シートを職員の数だけ作る・全員分を更新する（管理者用。休暇申請シートの作成.xlsm の「設定」シートのボタンから実行する）。
 ' 出勤・休暇管理データ の「職員名簿」（出勤用ID・氏名）と「休暇等」シート（年ごとの合計・本年使用の調整）を読み、
 ' 各休暇申請シートの非表示の「管理」シートに 出勤用ID・氏名・年・合計（分）・本年使用の調整（分）を書き込む。
-' 調整には、休暇等シートの本年使用の調整に、Forms で申請して承認された年次休暇（休暇申請シートには書かれない分）を足して書く。
 '   ［休暇申請シートを作成］… 職員名簿の全員について、まだない人の休暇申請シートをひな形から作る（あれば作らない・上書きしない）
 '   ［休暇申請シートを更新］… 作成先にある全員の休暇申請シートの「管理」シートを、休暇等シートの今の値に書き換える
 '   ［様式を移行］…… 様式の古い休暇申請シートを、書いてある申請の行と超過勤務等命令簿の月のシート・フレックスの申告と割振りを残して新しいひな形の様式にする
@@ -21,13 +20,15 @@ Private Const FLEX_SIN As String = "フレックス申告"
 Private Const FLEX_SIN_INPUTS As String = "D3,H12:Z403,AN12:AN25"
 Private Const FLEX_WARI As String = "フレックス割振り"
 Private Const FLEX_WARI_INPUTS As String = "D3,D4,AO12:AP25"
+' テレワーク実施報告：本人・所属長が書く欄（同じく様式を移行するときに写す）
+Private Const TW_REPORT As String = "テレワーク報告"
+Private Const TW_REPORT_INPUTS As String = "B3,D3,B7:I206"
 
 ' 出勤・休暇管理データ から読んだ値
 Private staff As Variant      ' 職員名簿 A:B（出勤用ID・氏名）
 Private keys As Variant       ' 計算用 H（出勤用ID|年）
 Private totals As Variant     ' 計算用 K（合計・分）
 Private adjust As Variant     ' 休暇等 G:H（本年使用の調整：日・時間）
-Private formsMin As Variant   ' 計算用 W（Forms で承認された年次休暇・分）
 Private holidays As Variant   ' 祝日 A（休暇申請シートの日数の計算で除く日）
 Private formVersion As String ' ひな形の様式の版（管理シート B11）
 Private carries As Variant    ' 計算用 J（繰越分・分）
@@ -260,10 +261,10 @@ Private Function WriteOvertimeInputs(wb As Workbook, months As Collection) As Lo
     Next i
 End Function
 
-' フレックスのシートの書いた欄を読む：(シート名, 番地, 式か値の2次元配列) の一覧。シートがなければ空
+' フレックスのシートとテレワーク報告の書いた欄を読む：(シート名, 番地, 式か値の2次元配列) の一覧。シートがなければ空
 Private Function ReadFlexInputs(wb As Workbook) As Collection
     Dim result As New Collection, spec As Variant, ws As Worksheet, area As Range
-    For Each spec In Array(Array(FLEX_SIN, FLEX_SIN_INPUTS), Array(FLEX_WARI, FLEX_WARI_INPUTS))
+    For Each spec In Array(Array(FLEX_SIN, FLEX_SIN_INPUTS), Array(FLEX_WARI, FLEX_WARI_INPUTS), Array(TW_REPORT, TW_REPORT_INPUTS))
         Set ws = SheetByName(wb, CStr(spec(0)))
         If Not ws Is Nothing Then
             For Each area In ws.Range(CStr(spec(1))).Areas
@@ -491,7 +492,7 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
     Application.Calculation = xlCalculationAutomatic
     wb.Close SaveChanges:=True
     Set wb = Nothing
-    MigrateOne = "移行しました（申請 " & rowCount & " 行、超過勤務の月 " & otCount & IIf(flexItems.Count > 0, "、フレックスの欄 " & flexCount, "") & "）。元のファイルの控え：" & backupDir & fileName
+    MigrateOne = "移行しました（申請 " & rowCount & " 行、超過勤務の月 " & otCount & IIf(flexItems.Count > 0, "、フレックス・テレワーク報告の欄 " & flexCount, "") & "）。元のファイルの控え：" & backupDir & fileName
     If noClock > 0 Then MigrateOne = MigrateOne & "【時刻がなく時間だけの行が " & noClock & " 行あります。開始時刻・終了時刻を入れてください（赤くなっています）】"
     Exit Function
 Failed:
@@ -660,7 +661,6 @@ Private Sub ReadMatching(matchPath As String)
     keys = src.Worksheets("計算用").Range("H2:H" & LEAVE_LAST).Value
     totals = src.Worksheets("計算用").Range("K2:K" & LEAVE_LAST).Value
     adjust = src.Worksheets("休暇等").Range("G2:H" & LEAVE_LAST).Value
-    formsMin = src.Worksheets("計算用").Range("W2:W" & LEAVE_LAST).Value
     holidays = src.Worksheets("祝日").Range("A2:A200").Value
     carries = src.Worksheets("計算用").Range("J2:J" & LEAVE_LAST).Value
     grants = src.Worksheets("計算用").Range("P2:P" & LEAVE_LAST).Value
@@ -686,7 +686,7 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
         If IsNumeric(totals(pos, 1)) And CStr(totals(pos, 1)) <> "" Then hold = totals(pos, 1)
         If IsNumeric(carries(pos, 1)) And CStr(carries(pos, 1)) <> "" Then carry = carries(pos, 1)
         If IsNumeric(grants(pos, 1)) And CStr(grants(pos, 1)) <> "" Then grant = grants(pos, 1) * DAY_MIN
-        adj = Round(Val(adjust(pos, 1)) * DAY_MIN + Val(adjust(pos, 2)) * 1440 + Val(formsMin(pos, 1)), 0)
+        adj = Round(Val(adjust(pos, 1)) * DAY_MIN + Val(adjust(pos, 2)) * 1440, 0)
     End If
     Set wb = Workbooks.Open(Filename:=path, UpdateLinks:=0)
     Set ws = wb.Worksheets("管理")
@@ -727,7 +727,7 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     Next i
     wb.Close SaveChanges:=True
     If pos > 0 Then
-        UpdateOne = "更新しました（繰越分 " & DaysText(carry) & "、本年分 " & DaysText(grant) & "、合計 " & DaysText(hold) & "、調整（Forms の分を含む） " & DaysText(adj) & "）"
+        UpdateOne = "更新しました（繰越分 " & DaysText(carry) & "、本年分 " & DaysText(grant) & "、合計 " & DaysText(hold) & "、調整 " & DaysText(adj) & "）"
     Else
         UpdateOne = "更新しました（合計は空欄：出勤・休暇管理データ の休暇等シートに " & yr & " 年の行がありません）"
     End If

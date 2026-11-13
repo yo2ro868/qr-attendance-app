@@ -47,6 +47,13 @@ try {
     $btn.OLEFormat.Object.Caption = '超過勤務を転記'
     $btn.OnAction = 'TransferOvertime'
     $btn.Placement = 3
+    # ［利用予定を書き出す］（利用予定シートの表を、今日の日付のシートに値で書き出す）
+    $ws = $wb.Worksheets.Item('利用予定')
+    $c = $ws.Range('AM5')
+    $btn = $ws.Shapes.AddFormControl(0, $c.Left + 2, $c.Top + 2, 170, 26)
+    $btn.OLEFormat.Object.Caption = '利用予定を書き出す'
+    $btn.OnAction = 'MakeScheduleSheet'
+    $btn.Placement = 3
     $wb.Worksheets.Item(1).Activate()
     if (Test-Path $Out) { Remove-Item $Out }
     $wb.SaveAs($Out, 52)   # 52 = マクロ有効ブック（.xlsm）

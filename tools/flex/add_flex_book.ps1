@@ -20,6 +20,14 @@ $FIRST, $LAST, $PERIOD = 12, 403, 28
 $SIN = "'フレックス申告'"
 $WARI = "'フレックス割振り'"
 
+# Excel が計算などで忙しいと COM の呼び出しが断られる（RPC_E_CALL_REJECTED）ので、少し待ってやり直す
+function Retry([scriptblock]$sb) {
+    for ($i = 0; $i -lt 50; $i++) {
+        try { return & $sb } catch { if ($_.Exception.HResult -eq -2147418111) { Start-Sleep -Milliseconds 200 } else { throw } }
+    }
+    throw 'Excel が応答しません'
+}
+
 $xl = New-Object -ComObject Excel.Application
 $xl.DisplayAlerts = $false
 $xl.Visible = $false
@@ -55,6 +63,10 @@ try {
         }
     }
     $t.Cells.Validation.Delete()
+    # 文字が欄に入りきらないところ（様式のまま）：曜日の欄と「異動後の所属長氏名」は縮めて入れ、P5・P6（合計の分。計算用）は表示しない
+    $t.Range('J3:J6').ShrinkToFit = $true
+    $t.Range('AN6').MergeArea.ShrinkToFit = $true
+    $t.Range('P5:P6').NumberFormat = ';;;'
     $xl.Calculation = -4135    # 手動（式を入れるあいだ再計算しない）
 
     # 1年間の始期・単位期間
@@ -75,6 +87,7 @@ try {
     $t.Range("Z${FIRST}:AU${LAST}").Formula = "=IF($SIN!D${FIRST}="""","""",$SIN!D${FIRST})"
     # 備考と、単位期間ごとの申告年月日・割振年月日
     for ($r = $FIRST; $r -le $LAST; $r++) {
+        Retry {
         $av = $t.Range("AV$r")
         $label = [string]$av.Value2
         $p = [math]::Floor(($r - $FIRST) / $PERIOD) + 1        # 単位期間
@@ -85,6 +98,7 @@ try {
             $t.Range("AW$r").Formula = "=IF(ISNUMBER($WARI!`$AP`$$pr),$WARI!`$AP`$$pr,"""")"
         } else {
             $av.MergeArea.Cells.Item(1, 1).Formula = "=IF($SIN!`$Z$r="""","""",$SIN!`$Z$r)"
+        }
         }
     }
     $xl.Calculation = -4105    # 自動

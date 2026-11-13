@@ -1,9 +1,9 @@
-"""別のPCに引き渡す「休暇申請一式」フォルダと zip を作る（Forms と休暇申請シートの両方）。
+"""別のPCに引き渡す「休暇申請一式」フォルダと zip を作る。
 
 使い方: python make_package.py [出力先フォルダ]
 出力先を省略するとプロジェクト直下に 休暇申請一式（フォルダ）と 休暇申請一式.zip を作る（同じ名前は作り直し）。
-中身：手順書（Forms）.html、手順書.html（休暇申請シート）、休暇申請シート（ひな形）.xlsx、休暇申請シートの作成.xlsm と 休暇申請シートの作成.bas（職員分の休暇申請シートを作るマクロ）、
-      休暇集計.xlsx（申請一覧）、出勤・休暇管理データ.xlsm と 出勤・休暇管理データのマクロ.bas（休暇申請シート・Forms を読み込む版の空の様式と、［申請を取り込む］のマクロ）、
+中身：手順書.html（休暇申請シート）、休暇申請シート（ひな形）.xlsx、休暇申請シートの作成.xlsm と 休暇申請シートの作成.bas（職員分の休暇申請シートを作るマクロ）、
+      休暇集計.xlsx（申請一覧）、出勤・休暇管理データ.xlsm と 出勤・休暇管理データのマクロ.bas（休暇申請シートなどを読み込む版の空の様式と、［申請を取り込む］のマクロ）、
       手順書（テレワーク）.html と テレワーク予定表（ひな形）.xlsx（所属長が出すテレワークの予定。tools/telework）、
       手順書（超過勤務）.html（休暇申請シートの超過勤務等命令簿。tools/overtime）、
       手順書（フレックス）.html（休暇申請シートのフレックスタイム制の申告・割振り。tools/flex）
@@ -37,7 +37,6 @@ def ps(script, *args):
 
 
 shutil.copy(HERE / "手順書.html", OUT / "手順書.html")
-shutil.copy(HERE / "手順書（Forms）.html", OUT / "手順書（Forms）.html")
 subprocess.run([sys.executable, str(HERE / "make_form.py"), str(OUT / "休暇申請シート（ひな形）.xlsx")], check=True)
 ps(HERE.parent / "overtime" / "add_overtime_sheet.ps1", "-Template", str(OUT / "休暇申請シート（ひな形）.xlsx"), "-Source", str(OT_SOURCE))
 ps(HERE.parent / "flex" / "add_flex_book.ps1", "-Template", str(OUT / "休暇申請シート（ひな形）.xlsx"), "-Source", str(FLEX_SOURCE))

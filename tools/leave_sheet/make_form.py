@@ -20,8 +20,10 @@ from openpyxl.workbook.defined_name import DefinedName
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "matching_excel"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "flex"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "telework"))
 from holidays import HOLIDAYS
 import flex_sheets
+import report_sheets
 
 OUT = sys.argv[1]
 FONT = "ＭＳ Ｐゴシック"
@@ -59,7 +61,7 @@ UNIT_TIME_ONLY = ["介護時間", "育児時間"]     # 時間・分単位だけ
 UNIT_DAY_ONLY = []                            # 日単位だけ（該当なし。必要になったら足す）
 APPROVALS = ["承認", "却下", "取消"]
 # 様式の版。申請シートの式や列を変えたら変える（マクロが、ひな形と版の違う休暇申請シートを結果シートで知らせる）
-FORM_VERSION = "2026-11-12a"
+FORM_VERSION = "2026-11-13a"
 
 f_base = Font(name=FONT, size=10)
 f_bold = Font(name=FONT, size=10, bold=True)
@@ -138,7 +140,7 @@ YR, HOLD, ADJ = f"{MG}!$B$3", f"{MG}!$B$4", f"{MG}!$B$5"   # 年、合計（分�
 BREAK_START, BREAK_END = f"{MG}!$B$9", f"{MG}!$B$10"        # 休憩の始め・終わり（短縮の特例の人はマクロが書き換える）
 CARRY, GRANT = f"{MG}!$B$7", f"{MG}!$B$8"                   # 繰越分（前年から引き継ぐ未使用分）、本年分（新たに付与される分）（分）
 mg = wb.create_sheet("管理")
-for i, label in enumerate(["出勤用ID", "氏名", "年", "合計（分）", "本年使用の調整と Forms の承認済み（分）", "更新日時", "繰越分（分）", "本年分（分）", "休憩の始め", "休憩の終わり"], start=1):
+for i, label in enumerate(["出勤用ID", "氏名", "年", "合計（分）", "本年使用の調整（分）", "更新日時", "繰越分（分）", "本年分（分）", "休憩の始め", "休憩の終わり"], start=1):
     mg[f"A{i}"] = label
 mg["B1"].number_format = "@"
 mg["A11"], mg["B11"] = "様式の版", FORM_VERSION
@@ -203,7 +205,7 @@ TOP = [
     ("繰越分", "C", "C", f"=N({CARRY})", days_text("C4")),
     ("本年分", "D", "D", f"=N({GRANT})", days_text("D4")),
     ("合計", "E", "E", f"=N({HOLD})", days_text("E4")),
-    # 本年使用＝ 出勤・休暇管理データ の調整（導入前の使用など）と Forms で承認された分 ＋ この用紙の承認済みの年次休暇
+    # 本年使用＝ 出勤・休暇管理データ の調整（導入前の使用など）＋ この用紙の承認済みの年次休暇
     ("本年使用（承認済み）", "F", "F",
      f'=N({ADJ})+SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"承認")', days_text("F4")),
     ("承認待ち", "G", "H", f'=SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"")', days_text("G4")),
@@ -439,6 +441,9 @@ ws.print_title_rows = f"{HEAD}:{HEAD}"
 # ===== フレックスタイム制の申告・割振り（tools/flex）。様式どおりの「申告・割振り簿」は add_flex_book.ps1 が足す =====
 flex_sheets.add(wb, MG, OFF_DAYS)
 
+# ===== テレワーク実施報告（tools/telework/report_sheets.py）。印刷用は別紙３の様式 =====
+report_sheets.add(wb, MG, TIME_RANGE)
+
 # ===== 使い方 =====
 us = wb.create_sheet("使い方")
 us.column_dimensions["A"].width = 110
@@ -473,6 +478,11 @@ for i, text in enumerate([
     "・所属長：「フレックス割振り」シートで内容を確かめ、右の表の承認の欄で「承認」を選び、割振年月日を入れます。",
     "・「申告・割振り簿」シートは、総務課の様式どおりの完成版です（印刷用。ここでは書き換えられません）。F5〜I5 の単位期間を変えると、その期間の合計が出ます。",
     "・承認の後で申告を書き直したら、申告年月日を書き直した日にします。所属長が割振年月日を書き直す（承認し直す）まで、承認されていない扱いになります。",
+    "",
+    "■ テレワーク実施報告",
+    "・本人：テレワークをしたら「テレワーク報告」シートに1回1行で、提出日・実施日・開始時刻・終了時刻・業務内容（備考）を書き、所属長に Notes でこのファイルのリンクを送って知らせます。",
+    "・所属長：同じ行の青の欄に確認日（必要ならコメント）を入れます。",
+    "・「テレワーク実施報告書」シートは別紙３の様式どおりの印刷用です。M2 に印刷する番号（テレワーク報告シートの番号）を入れます（書き換えられません）。",
 ], start=3):
     us[f"A{i}"] = text
     us[f"A{i}"].font = f_bold if text.startswith("■") else f_base

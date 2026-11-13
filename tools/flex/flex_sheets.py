@@ -352,7 +352,7 @@ def add(wb, MG, OFF_DAYS):
         tm = f"{per_col(3)}{k + 1}"
         return f'=INT({tm}/60)&"時間"&MOD({tm},60)&"分"'
 
-    period_table(sin, [("期間", 4), ("開始日", 6), ("終了日", 6), ("合計", 11), ("申告年月日", 11), ("状態", 30)],
+    period_table(sin, [("期間", 5.5), ("開始日", 7.5), ("終了日", 7.5), ("合計", 11), ("申告年月日", 11), ("状態", 30)],
                  lambda k, pr: [k, f"={S}!$B${FIRST + (k - 1) * PERIOD}", f"={S}!$B${FIRST + k * PERIOD - 1}",
                                 total_text(k), None, f"={per_col(8)}{k + 1}"],
                  inputs={4}, input_fill=fill_staff)
@@ -414,7 +414,7 @@ def add(wb, MG, OFF_DAYS):
     wari.conditional_formatting.add(f"{CHECK}{FIRST}:{CHECK}{LAST}", FormulaRule(formula=[f'${CHECK}{FIRST}<>""'], fill=fill_bad, font=font_bad))
     wari.conditional_formatting.add(f"A{FIRST}:{MINS}{LAST}",
                                     FormulaRule(formula=[f"OR(${WEEKEND}{FIRST}=1,${OFF}{FIRST}=1)"], fill=fill_off))
-    period_table(wari, [("期間", 4), ("開始日", 6), ("終了日", 6), ("合計", 11), ("申告年月日", 11), ("承認", 7), ("割振年月日", 11), ("状態", 30)],
+    period_table(wari, [("期間", 5.5), ("開始日", 7.5), ("終了日", 7.5), ("合計", 11), ("申告年月日", 11), ("承認", 7), ("割振年月日", 11), ("状態", 30)],
                  lambda k, pr: [k, f"={S}!$B${FIRST + (k - 1) * PERIOD}", f"={S}!$B${FIRST + k * PERIOD - 1}",
                                 total_text(k), f'=IF(ISNUMBER({S}!$AN${pr}),{S}!$AN${pr},"")', None, None, f"={per_col(8)}{k + 1}"],
                  inputs={5, 6}, input_fill=fill_boss)

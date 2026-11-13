@@ -51,17 +51,18 @@ TOTAL_MAX = 40        # 1年に使える日数（繰越分＋本年分）の上�
 DAY_MIN = 465         # 年次休暇の1日＝7時間45分＝465分（15分単位で取得できる）
 HOL = "'祝日'!$A$2:$A$200"
 HOUR_CATS = ["病気休暇", "看護休暇"]
-# 休暇申請シートの読み込みシート：休暇申請シート（tools/leave_sheet）と Forms の回答を Power Query で読んだ表を置く（add_queries.ps1 が作る）。
-# 2〜4行目が設定（休暇申請シートのフォルダ、Forms の回答ファイル2つ）。表の見出しは8行目、データは9行目から。
+# 休暇申請シートの読み込みシート：休暇申請シート（tools/leave_sheet）を Power Query で読んだ表を置く（add_queries.ps1 が作る）。
+# 2行目が設定（休暇申請シートのフォルダ）、5行目が前回の取り込みの日時。表の見出しは8行目、データは9行目から。
 # 6行目に各表の行数（照合を速くするため、その行数の範囲だけを探す。式は add_queries.ps1 が表を作ってから入れる）。
 # 表は読み直すと行が増減して下のセルがずれるので、この表を指す式は列全体（$A:$A）と行番号で書く
 AU = "'休暇申請シートの読み込み'"
 AUTO_COUNT_ROW, AUTO_HEAD = 6, 8
 AUTO_FIRST = AUTO_HEAD + 1
-AU_Y, AU_M, AU_D = "A", "E", "S"     # 年休_自動（キー・分・Forms分）、月別_自動（キー・1〜12月）、日別_自動（キー・8欄）のキーの列
+AU_Y, AU_M, AU_D = "A", "E", "S"     # 年休_自動（キー・分）、月別_自動（キー・1〜12月）、日別_自動（キー・8欄）のキーの列
 AU_T = "AD"                           # テレワーク_日別（キー・表示・備考）のキーの列
 AU_F = "AH"                           # フレックス_出勤簿（キー・表示）のキーの列
-AUTO_TABLES = {"年休_自動": AU_Y, "月別_自動": AU_M, "日別_自動": AU_D, "テレワーク_日別": AU_T, "フレックス_出勤簿": AU_F}
+AU_U = "AK"                           # 利用予定_日別（キー・表示）のキーの列
+AUTO_TABLES = {"年休_自動": AU_Y, "月別_自動": AU_M, "日別_自動": AU_D, "テレワーク_日別": AU_T, "フレックス_出勤簿": AU_F, "利用予定_日別": AU_U}
 TW = "'テレワーク一覧'"                # テレワーク一覧シート：B2 がテレワーク予定表のフォルダ、表は TW_HEAD 行目から（add_queries.ps1 が作る）
 TW_HEAD = 5
 
@@ -191,18 +192,21 @@ for i, (text, bold) in enumerate(lines, start=3):
 
 # ===== 職員名簿（入力専用） =====
 ws = wb.create_sheet("職員名簿")
-header(ws, 1, ["出勤用ID", "氏名", "メールアドレス", "備考", "休憩の始め\n（短縮の人のみ）", "休憩の終わり\n（短縮の人のみ）"], [12, 18, 32, 30, 13, 13])
-ws.row_dimensions[1].height = 30
+header(ws, 1, ["出勤用ID", "氏名", "メールアドレス", "備考", "休憩の始め\n（短縮の人のみ）", "休憩の終わり\n（短縮の人のみ）",
+                "部", "課", "並び順"], [12, 18, 32, 30, 13, 13, 12, 12, 8])
+ws.row_dimensions[1].height = 36
 for c in ws[1]:
     c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-style_range(ws, 2, NAME_LAST, 1, 6, fill=fill_input)
+style_range(ws, 2, NAME_LAST, 1, 9, fill=fill_input)
+style_range(ws, 2, NAME_LAST, 9, 9, fill=fill_input, align=center)
 style_range(ws, 2, NAME_LAST, 5, 6, fill=fill_input, fmt="h:mm", align=center)
 style_range(ws, 2, NAME_LAST, 1, 1, fmt="@", align=center)
 ws["A2"], ws["B2"], ws["D2"] = "1234", "（例）田中 太郎", "この行は例です。削除してください"
-ws["H1"] = "メールアドレスは、Forms で休暇を申請するときの組織のアカウント（例 tanaka@...）です。Forms の申請をこの人のものとして読み取ります。"
-ws["H2"] = "休憩時間の短縮の特例を使う人だけ、E・F 列に休憩の始めと終わりを入れます（例 12:00、12:30）。空欄の人は 12:00〜13:00 です。"
-ws["H3"] = "変えたら、休暇申請シートの作成.xlsm の［休暇申請シートを更新］を押すと、休暇申請シートの時間の計算に反映されます。"
-ws["H1"].font = ws["H2"].font = ws["H3"].font = f_note
+ws["K1"] = "メールアドレスは連絡用です（使わなければ空欄で構いません）。"
+ws["K2"] = "休憩時間の短縮の特例を使う人だけ、E・F 列に休憩の始めと終わりを入れます（例 12:00、12:30）。空欄の人は 12:00〜13:00 です。"
+ws["K3"] = "変えたら、休暇申請シートの作成.xlsm の［休暇申請シートを更新］を押すと、休暇申請シートの時間の計算に反映されます。"
+ws["K4"] = "部・課・並び順は「利用予定」シート（フレックス／テレワーク利用予定）の並びに使います。並び順の小さい順（同じなら上の行から）。部が空欄の人は一覧に出しません。"
+ws["K1"].font = ws["K2"].font = ws["K3"].font = ws["K4"].font = f_note
 wb.defined_names["職員名簿表"] = DefinedName("職員名簿表", attr_text=f"{N}!$A$1:$C${NAME_LAST}")
 ws.freeze_panes = "A2"
 
@@ -221,13 +225,17 @@ ws = wb.create_sheet("計算用")
 header(ws, 1, ["名簿の照合キー", "重複", "", "", "", "名簿の連番", "",
                 "年休キー（ID|年）", "前年の行", "繰越分（分）", "合計（分）", "翌年繰越（分）", "", "",
                 "本年使用（分）", "本年分（日）", "在職期間の始め", "在職期間の終わり", "在職期間の区分",
-                "申請の年休（分）", "病気休暇の行", "看護休暇の行", "うち Forms の年休（分）"],
-       [16, 8, 4, 4, 4, 10, 4, 16, 8, 10, 10, 10, 4, 4, 10, 10, 12, 12, 10, 12, 10, 10, 14],
+                "申請の年休（分）", "病気休暇の行", "看護休暇の行", "", "利用予定の並び", "k番目の名簿の位置"],
+       [16, 8, 4, 4, 4, 10, 4, 16, 8, 10, 10, 10, 4, 4, 10, 10, 12, 12, 10, 12, 10, 10, 14, 12, 12],
        fill=PatternFill("solid", fgColor="7F7F7F"))
 for r in range(2, NAME_LAST + 1):
     ws[f"A{r}"] = "=" + key(name_col("A"))
     ws[f"B{r}"] = f'=IF(A{r}="","",IF(COUNTIF($A$2:$A${NAME_LAST},A{r})>1,"重複",""))'
     ws[f"F{r}"] = f'=IF(A{r}="","",COUNTIF($A$2:A{r},"?*"))'
+    # 利用予定の並び：部のある人（例の行を除く）を 並び順（空欄は最後）→ 名簿の行 の順に。Y 列は k 番目の人の名簿の位置（1〜）
+    ws[f"X{r}"] = (f'=IF(OR(A{r}="",{name_col("G")}&""="",ISNUMBER(SEARCH("（例）",{name_col("B")}))),"",'
+                   f'IF(ISNUMBER({name_col("I")}),{name_col("I")},100000)*1000+ROW())')
+    ws[f"Y{r}"] = f'=IFERROR(MATCH(SMALL($X$2:$X${NAME_LAST},ROW()-1),$X$2:$X${NAME_LAST},0),"")'
 # 休暇等シートの各行（同じ行番号）について、繰越分・合計・翌年繰越を「分」で計算する（1日＝7時間45分＝465分）。
 # 休暇等シートの列：A 出勤用ID, B 年, C 本年分, D 繰越分（活用開始時）, E 採用日, F 退職日, G・H 本年使用の調整（日・時間）
 # 繰越分 = 前年の行の翌年繰越（前年の行がなければ、その行に手入力した繰越分）
@@ -245,11 +253,9 @@ for r in range(2, LEAVE_LAST + 1):
     ws[f"P{r}"] = (f'=IF(H{r}="","",IF({leave_col("C")}&""<>"",N({leave_col("C")}),'
                    f'IF(AND({hire}="",{leave}=""),{GRANT_DEFAULT},'
                    f'IF(S{r}<0,0,CHOOSE(MIN(S{r},11)+1,{",".join(str(d) for d in PRORATED)})))))')
-    # 休暇申請シート・Forms の承認済みの年次休暇（分）と、そのうち Forms の分（休暇申請シートの作成.xlsm が休暇申請シートに書く）、
-    # 病気休暇・看護休暇の月別_自動の行
+    # 休暇申請シートの承認済みの年次休暇（分）と、病気休暇・看護休暇の月別_自動の行
     year_row = auto_match(f"H{r}", AU_Y)
     ws[f"T{r}"] = f'=IF(H{r}="","",IFERROR(INDEX({auto_col(col_after(AU_Y, 1))},{year_row}),0))'
-    ws[f"W{r}"] = f'=IF(H{r}="","",IFERROR(INDEX({auto_col(col_after(AU_Y, 2))},{year_row}),0))'
     ws[f"U{r}"] = f'=IF(H{r}="","",{auto_match(f"H{r}&" + chr(34) + "|病気休暇" + chr(34), AU_M)})'
     ws[f"V{r}"] = f'=IF(H{r}="","",{auto_match(f"H{r}&" + chr(34) + "|看護休暇" + chr(34), AU_M)})'
     # 本年使用（分）＝ 休暇等シートの調整（手入力）＋ 休暇申請シートの分
@@ -472,7 +478,8 @@ def report_block(ws, t, month_ref, key_formula, idx_formula):
     # 見出し（1月〜12月）は2行分の高さ、その下に区分ごとに「その月」と「累計」の2行
     box(ws, f"M{t + 1}", f"N{t + 2}", None, small_label)
     for i, col in enumerate(SUB[12:]):          # O〜Z
-        box(ws, f"{col}{t + 1}", f"{col}{t + 2}", f"{i + 1}月", small_label)
+        box(ws, f"{col}{t + 1}", f"{col}{t + 2}", f"{i + 1}月", small_label,
+            align=Alignment(horizontal="center", vertical="center", shrink_to_fit=True))   # 10月〜12月は細い欄に縮めて入れる
     for j, cat in enumerate(HOUR_CATS):
         r = t + 3 + j * 2                       # その月の取得時間
         rc = r + 1                              # 1月からその月までの累計
@@ -682,9 +689,9 @@ ws = wb.create_sheet("休暇等")
 INPUTS = [("出勤用ID", 12), ("年（西暦）", 9), ("本年分（日）\n空欄は自動", 11), ("繰越分（日）\n活用開始時のみ", 13),
           ("採用日\n（年の途中のみ）", 12), ("退職日\n（年の途中のみ）", 12),
           ("本年使用の\n調整（日）", 10), ("本年使用の\n調整（時間）", 10)]                      # A〜H
-AUTOS = [("本年分\n（自動）", 9), ("繰越分\n（自動）", 13), ("合計\n（自動）", 13),
-         ("本年使用\n（休暇申請シート）", 13), ("本年使用\n（合計）", 13), ("残り\n（自動）", 13),
-         ("翌年繰越\n（自動）", 13)]                                                              # I〜O
+AUTOS = [("本年分\n（自動）", 9), ("繰越分\n（自動）", 15), ("合計\n（自動）", 15),
+         ("本年使用\n（休暇申請シート）", 15), ("本年使用\n（合計）", 15), ("残り\n（自動）", 15),
+         ("翌年繰越\n（自動）", 15)]                                                              # I〜O
 MONTH_COLS = {cat: [get_column_letter(16 + j * 12 + i) for i in range(12)] for j, cat in enumerate(HOUR_CATS)}
 NOTE_COL = get_column_letter(16 + 24)                                                             # AN 備考
 labels = [x for x, _ in INPUTS + AUTOS]
@@ -695,7 +702,7 @@ for cat in HOUR_CATS:
 labels.append("備考")
 widths.append(24)
 header(ws, 1, labels, widths)
-ws.row_dimensions[1].height = 32
+ws.row_dimensions[1].height = 50
 for c in ws[1]:
     c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 fill_month = PatternFill("solid", fgColor="5B4A7A")      # 病気休暇・看護休暇の見出しは色を変えて区切る
@@ -760,8 +767,6 @@ ws["A1"] = "休暇の申請の読み込み"
 ws["A1"].font = f_title
 for r, (label, note) in enumerate([
     ("休暇申請シートのフォルダ", "← 休暇申請シート（休暇申請シート　出勤用ID　氏名.xlsx）を置いた OneDrive の同期フォルダの場所（使わなければ空欄）"),
-    ("Forms 申請の回答", "← 休暇申請フォームの回答の Excel ファイルの場所（OneDrive の同期フォルダの中。使わなければ空欄）"),
-    ("Forms 承認の回答", "← 休暇承認フォームの回答の Excel ファイルの場所（同上）"),
 ], start=2):
     ws[f"A{r}"] = label
     ws[f"A{r}"].font = f_bold
@@ -776,9 +781,9 @@ ws["B5"].number_format = "yyyy/m/d h:mm"
 ws["B5"].alignment = left
 ws["L5"] = "目次の［最新を読み込む］（またはこのシートの［申請を取り込む］）を押したときに読み込みます（1分ほどかかります。開いただけでは読み込みません）。読むのは保存された内容です。6行目は読み込んだ行数です。"
 ws["L5"].font = f_note
-ws.column_dimensions["B"].width = 16
+ws.column_dimensions["B"].width = 19
 for col, label in zip(AUTO_TABLES.values(), ["年次休暇（出勤用ID|年 ごとの使用・分）", "病気休暇・看護休暇（月ごと）", "出勤簿の日ごとの欄",
-                                              "テレワーク（出勤簿の出勤欄・備考）", "フレックス（出勤簿の備考）"]):
+                                              "テレワーク（出勤簿の出勤欄・備考）", "フレックス（出勤簿の備考）", "利用予定（日ごとの文字）"]):
     ws[f"{col}{AUTO_HEAD - 1}"] = label
     ws[f"{col}{AUTO_HEAD - 1}"].font = f_bold
     # 6行目：表の行数（出勤簿などがこの行数の範囲だけを探す。式は add_queries.ps1 が入れる）
@@ -787,15 +792,18 @@ for col, label in zip(AUTO_TABLES.values(), ["年次休暇（出勤用ID|年 ご
 ws.column_dimensions["A"].width = 18
 ws.column_dimensions[AU_M].width = 22
 ws.column_dimensions[AU_D].width = 18
+for _c in range(1, 9):     # 日別_自動の8欄（見出しが入る幅）
+    ws.column_dimensions[col_after(AU_D, _c)].width = 16
 ws.column_dimensions[AU_T].width = 18
 ws.column_dimensions[AU_F].width = 18
+ws.column_dimensions[AU_U].width = 18
+ws.column_dimensions[col_after(AU_F, 1)].width = 16
+ws.column_dimensions[col_after(AU_U, 1)].width = 18
 wb.defined_names["フォルダ"] = DefinedName("フォルダ", attr_text=f"{AU}!$B$2")
-wb.defined_names["Forms申請ファイル"] = DefinedName("Forms申請ファイル", attr_text=f"{AU}!$B$3")
-wb.defined_names["Forms承認ファイル"] = DefinedName("Forms承認ファイル", attr_text=f"{AU}!$B$4")
 
-# ===== 申請一覧（休暇申請シートと Forms の全員の申請と状況。表は add_queries.ps1 が作る） =====
+# ===== 申請一覧（休暇申請シートの全員の申請と状況。表は add_queries.ps1 が作る） =====
 ws = wb.create_sheet("申請一覧")
-ws["A1"] = "全員の休暇の申請（休暇申請シートと Forms）。目次の［最新を読み込む］（またはこのシートの［申請を取り込む］）を押すと最新になります。見出しの ▼ で絞り込めます。"
+ws["A1"] = "全員の休暇の申請（休暇申請シート）。目次の［最新を読み込む］（またはこのシートの［申請を取り込む］）を押すと最新になります。見出しの ▼ で絞り込めます。"
 ws["A1"].font = f_note
 wb.defined_names["祝日一覧"] = DefinedName("祝日一覧", attr_text="'祝日'!$A$2:$A$200")
 
@@ -856,6 +864,95 @@ ws = wb.create_sheet("フレックスの読み込み")
 ws["A1"] = "休暇申請シートのフレックスの申告・割振りを読んだ今の内容です（承認待ちも含む。目次の［最新を読み込む］で最新になります）。"
 ws["A1"].font = f_note
 
+# ===== テレワーク報告（休暇申請シートのテレワーク実施報告の全員分。表 テレワーク報告一覧 は add_queries.ps1 が作る） =====
+ws = wb.create_sheet("テレワーク報告")
+ws["A1"] = ("全員のテレワーク実施報告（休暇申請シートの「テレワーク報告」）と所属長の確認です。目次の［最新を読み込む］で最新になります。"
+            "「注意」の列に、入力の不備、テレワーク予定表に予定がない日、提出から1週間たっても確認がないものが出ます。")
+ws["A1"].font = f_note
+
+# ===== 利用予定（フレックス／テレワーク利用予定の一覧：部・課・職員 × その月の日付。配る用の表は、マクロ［その日のシートに書き出す］が値で作る） =====
+# 行は職員名簿の部のある人を 並び順 → 名簿の行 の順（計算用 X・Y 列）。日付の欄は 利用予定_日別（休暇・テレ・フレックスの勤務開始）。
+SCHED, S_FIRST = "利用予定", 6
+S_LAST = S_FIRST + STAFF_ROWS - 1
+S_DAYS = [get_column_letter(4 + i) for i in range(31)]          # D〜AH
+S_HID_POS, S_HID_KEY = "AJ", "AK"                                # 隠し列：k 番目の人の名簿の位置、照合キー
+S_CTRL_L, S_CTRL_V = "AM", "AN"                                  # 印刷範囲の外：対象月・情報の日時
+ws = wb.create_sheet(SCHED)
+ws.sheet_view.showGridLines = False
+for col, width in (("A", 8), ("B", 10), ("C", 14)):
+    ws.column_dimensions[col].width = width
+for col in S_DAYS:
+    ws.column_dimensions[col].width = 5.2
+ws.column_dimensions["AI"].width = 2
+for col in (S_HID_POS, S_HID_KEY):
+    ws.column_dimensions[col].hidden = True
+ws.column_dimensions[S_CTRL_L].width = 12
+ws.column_dimensions[S_CTRL_V].width = 16
+control(ws, f"{S_CTRL_L}1", "対象月", f_label, fill_label)
+control(ws, f"{S_CTRL_V}1", date(2026, 11, 1), f_bold, fill_input, 'yyyy"年"m"月"')
+control(ws, f"{S_CTRL_L}2", "情報の日時", f_label, fill_label)
+control(ws, f"{S_CTRL_V}2", f"={AU}!$B$5", f_base, fill_calc, "m/d h:mm")
+MONTH1 = f"${S_CTRL_V}$1"
+ws[f"{S_CTRL_L}7"] = "↑ 対象月を入れ、目次の［最新を読み込む］のあとで、下のボタンを押すと、今日の日付のシート（例 11月16日）にこの表を値で書き出します（配る用）。"
+ws[f"{S_CTRL_L}7"].font = f_note
+ws[f"{S_CTRL_L}7"].alignment = Alignment(wrap_text=True, vertical="top")
+ws.merge_cells(f"{S_CTRL_L}7:{S_CTRL_V}11")
+ws.row_dimensions[3].height = 13
+# 1〜2行目：題名と「令和8年11月16日9:00現在の情報を基に更新」
+ws.merge_cells("A1:T2")
+ws["A1"] = f'=IF({MONTH1}="","フレックス／テレワーク利用予定","令和"&(YEAR({MONTH1})-2018)&"年"&MONTH({MONTH1})&"月　フレックス／テレワーク利用予定")'
+ws["A1"].font = Font(name=FONT, size=12, bold=True, color="1E3A5F")
+ws["A1"].alignment = left
+ws.merge_cells("V1:AH2")
+ws["V1"] = (f'=IF(${S_CTRL_V}$2="","",IF(YEAR(${S_CTRL_V}$2)-2018=1,"令和元",'
+            f'"令和"&(YEAR(${S_CTRL_V}$2)-2018))&"年"&TEXT(${S_CTRL_V}$2,"m月d日h:mm")&"現在の情報を基に更新")')
+ws["V1"].font = f_note
+ws["V1"].alignment = Alignment(horizontal="right", vertical="center")
+# 3〜5行目：月・日・曜日
+head_fill = PatternFill("solid", fgColor="DDEBF7")
+ws.merge_cells("A3:C5")
+ws["A3"] = "氏名"
+ws.merge_cells(f"D3:{S_DAYS[-1]}3")
+ws["D3"] = f'=IF({MONTH1}="","",MONTH({MONTH1})&"月")'
+for i, col in enumerate(S_DAYS, start=1):
+    ws[f"{col}4"] = f'=IF({MONTH1}="","",IF({i}<=DAY(EOMONTH({MONTH1},0)),DATE(YEAR({MONTH1}),MONTH({MONTH1}),{i}),""))'
+    ws[f"{col}4"].number_format = "d"
+    ws[f"{col}5"] = f'=IF({col}4="","",TEXT({col}4,"aaa"))'
+for row in ws[f"A3:{S_DAYS[-1]}5"]:
+    for c in row:
+        c.font, c.fill, c.border, c.alignment = Font(name=FONT, size=9, bold=True), head_fill, border, center
+small = Font(name=FONT, size=9)
+day_align = Alignment(horizontal="center", vertical="center", shrink_to_fit=True)
+for r in range(S_FIRST, S_LAST + 1):
+    k = r - S_FIRST + 1
+    ws[f"{S_HID_POS}{r}"] = f"=INDEX({K}!$Y$2:$Y${NAME_LAST},{k})"
+    ws[f"{S_HID_KEY}{r}"] = f'=IF({S_HID_POS}{r}="","",INDEX({K}!$A$2:$A${NAME_LAST},{S_HID_POS}{r}))'
+    for col, src in (("A", "G"), ("B", "H"), ("C", "B")):
+        ws[f"{col}{r}"] = f'=IF(${S_HID_POS}{r}="","",INDEX({N}!${src}$2:${src}${NAME_LAST},${S_HID_POS}{r})&"")'
+        ws[f"{col}{r}"].font, ws[f"{col}{r}"].border = small, border
+        ws[f"{col}{r}"].alignment = Alignment(horizontal="left" if col == "C" else "center", vertical="center", wrap_text=True)
+    day_key = f'${S_HID_KEY}{r}&"|"&TEXT({{c}}$4,"yyyy-mm-dd")'
+    for col in S_DAYS:
+        kk = day_key.replace("{c}", col)
+        ws[f"{col}{r}"] = (f'=IF(OR(${S_HID_KEY}{r}="",{col}$4=""),"",'
+                           f'IFERROR(INDEX({auto_col(col_after(AU_U, 1))},{auto_match(kk, AU_U)})&"",""))')
+        ws[f"{col}{r}"].font, ws[f"{col}{r}"].border, ws[f"{col}{r}"].alignment = small, border, day_align
+    ws.row_dimensions[r].height = 16.5
+# 土日・祝日・年末年始の列は灰色。部・課は上の行と同じなら文字を見せない（書き出したシートでは結合する）
+ws.conditional_formatting.add(f"D4:{S_DAYS[-1]}{S_LAST}", FormulaRule(
+    formula=[f"AND(ISNUMBER(D$4),{off_day('D$4')})"], fill=PatternFill("solid", fgColor="E7E6E6", bgColor="E7E6E6")))
+ws.conditional_formatting.add(f"A{S_FIRST + 1}:A{S_LAST}", FormulaRule(formula=[f'AND(A{S_FIRST + 1}<>"",A{S_FIRST + 1}=A{S_FIRST})'], font=Font(color="FFFFFF")))
+ws.conditional_formatting.add(f"B{S_FIRST + 1}:B{S_LAST}", FormulaRule(
+    formula=[f'AND(B{S_FIRST + 1}<>"",A{S_FIRST + 1}=A{S_FIRST},B{S_FIRST + 1}=B{S_FIRST})'], font=Font(color="FFFFFF")))
+ws.freeze_panes = f"D{S_FIRST}"
+ws.page_setup.paperSize = ws.PAPERSIZE_A4
+ws.page_setup.orientation = "landscape"
+ws.page_setup.fitToWidth = 1
+ws.page_setup.fitToHeight = 0
+ws.sheet_properties.pageSetUpPr.fitToPage = True
+ws.print_title_rows = "1:5"
+ws.print_area = f"A1:{S_DAYS[-1]}{S_LAST}"
+
 # ===== 目次（先頭のシート）：作業の流れごとに、行くシートとボタンと今の状況 =====
 # E 列の「[ボタン]マクロ名|表示」は add_buttons.ps1 がボタンにする。F 列の「[式]=…」は表（Power Query の表など）を指す式なので、
 # 表ができたあとで add_buttons.ps1 が式にする（openpyxl では表の名前を使った式を書けないため）
@@ -871,7 +968,7 @@ ws["B2"] = "上から順に作業します。シート名を押すとそのシ�
 ws["B2"].font = f_note
 GROUPS = [   # （まとまり, 見出しの色, [(番号, 作業, シート, 行き先のセル, ボタン, 状況の式)])
     ("最新の内容を読み込む（作業の前に）", "1E3A5F", [
-        ("", "休暇申請シート・Forms・テレワーク予定表・超過勤務等命令簿・フレックスを読み直し、承認済みのフレックスを取り込みます（1分ほどかかります）", "", "", "ImportRequests|最新を読み込む",
+        ("", "休暇申請シート・テレワーク予定表・超過勤務等命令簿・フレックス・テレワーク報告を読み直し、承認済みのフレックスを取り込みます（1分ほどかかります）", "", "", "ImportRequests|最新を読み込む",
          "='休暇申請シートの読み込み'!B5"),
     ]),
     ("毎月の出勤簿", "2E75B6", [
@@ -884,15 +981,17 @@ GROUPS = [   # （まとまり, 見出しの色, [(番号, 作業, シート, �
     ("休暇", "548235", [
         ("1", "申請の状況を確かめる（承認待ち・注意）", "申請一覧", "A1", "", "[式]=COUNTIF(申請一覧[状況],\"承認待ち\")"),
         ("2", "年次休暇の残り・本年分・調整を確かめる（年が変わったら新しい年の行を足す）", "休暇等", "A1", "", ""),
-        ("3", "休暇申請シートの場所・Forms の回答の場所（最初に一度）", "休暇申請シートの読み込み", "B2", "", ""),
+        ("3", "休暇申請シートのフォルダの場所（最初に一度）", "休暇申請シートの読み込み", "B2", "", ""),
     ]),
     ("テレワーク・超過勤務・フレックス", "C55A11", [
         ("1", "テレワークの予定と注意を確かめる", "テレワーク一覧", "A5", "", "[式]=COUNTIF(テレワーク一覧[注意],\"?*\")"),
+        ("", "テレワーク実施報告と所属長の確認を確かめる", "テレワーク報告", "A3", "", "[式]=COUNTIF(テレワーク報告一覧[状況],\"確認待ち\")"),
         ("2", "超過勤務等命令簿の所属長の確認の状況を見る", "超過勤務の読み込み", "A3", "", "[式]=COUNTIF(超勤_月[状況],\"確認待ち\")"),
         ("3", "月を B2 に入れて、確認済みの月を写す（月1回）", "超過勤務", "B2", "TransferOvertime|超過勤務を転記", ""),
         ("4", "写した日ごとの行の注意を確かめる", "超過勤務の日別", "A3", "", "[式]=COUNTIF(転記_日別[注意],\"?*\")"),
         ("5", "フレックスの単位期間の承認の状況と注意を確かめる", "フレックス", "A3", "", "[式]=COUNTIF(フレックス一覧[注意],\"?*\")"),
         ("6", "取り込んだフレックスの割振りと照合の注意を確かめる", "フレックスの日別", "A3", "", "[式]=COUNTIF(確定_フレックス日別[注意],\"?*\")"),
+        ("7", "フレックス／テレワーク利用予定を作る（AN1 に月。今日の日付のシートに書き出す）", "利用予定", "AN1", "MakeScheduleSheet|利用予定を書き出す", ""),
     ]),
     ("台帳（変わったときに）", "7F7F7F", [
         ("1", "職員名簿（出勤用ID・氏名・メール・休憩の特例）", "職員名簿", "A2", "", '=COUNTIF(計算用!B2:B501,"重複")'),
@@ -901,7 +1000,7 @@ GROUPS = [   # （まとまり, 見出しの色, [(番号, 作業, シート, �
     ]),
 ]
 STATUS_LABEL = {"休暇申請シートの読み込み'!B5": "前回の読み込み", "★名簿に未登録": "名簿に未登録 {} 件",
-                "承認待ち": "承認待ち {} 件", "テレワーク一覧[注意]": "注意 {} 件", "確認待ち": "確認待ち {} 人・月",
+                "承認待ち": "承認待ち {} 件", "テレワーク一覧[注意]": "注意 {} 件", "テレワーク報告一覧[状況]": "確認待ち {} 件", "確認待ち": "確認待ち {} 人・月",
                 "転記_日別[注意]": "注意 {} 日", "フレックス一覧[注意]": "注意 {} 件", "確定_フレックス日別[注意]": "注意 {} 日",
                 "重複": "ID の重複 {} 件"}
 TAB_COLORS = {}
@@ -914,7 +1013,7 @@ for title, color, items in GROUPS:
     ws.row_dimensions[r].height = 20
     r += 1
     for no, task, sheet, cell, button, status in items:
-        ws.row_dimensions[r].height = 30
+        ws.row_dimensions[r].height = max(30, 15 * -(-len(task) // 21))     # 長い説明は折り返して入る高さに
         ws.cell(row=r, column=2, value=no).alignment = Alignment(horizontal="center", vertical="center")
         ws.cell(row=r, column=3, value=task).alignment = Alignment(vertical="center", wrap_text=True)
         if sheet:
@@ -953,8 +1052,8 @@ ws.cell(row=r + 2, column=2, value="このファイルを開いただけでは�
 # シートの並びと見出しの色：目次 → 毎月の出勤簿 → 休暇 → テレワーク・超過勤務 → 台帳 → 使い方（計算用は非表示）
 ORDER = ["目次", "出力データ貼付", "照合結果", "月次一覧", "出勤簿", "一括印刷",
          "申請一覧", "休暇等", "休暇申請シートの読み込み",
-         "テレワーク一覧", "超過勤務の読み込み", "超過勤務", "超過勤務の日別",
-         "フレックス", "フレックスの日別", "フレックスの読み込み",
+         "テレワーク一覧", "テレワーク報告", "超過勤務の読み込み", "超過勤務", "超過勤務の日別",
+         "フレックス", "フレックスの日別", "フレックスの読み込み", "利用予定",
          "職員名簿", "祝日", "使い方", "計算用"]
 assert sorted(ORDER) == sorted(s.title for s in wb.worksheets), [s.title for s in wb.worksheets]
 wb._sheets = [wb[name] for name in ORDER]
