@@ -8,6 +8,7 @@
 #   ・備考（AV 列）：フレックス申告シートの備考。単位期間ごとの申告年月日（AW）はフレックス申告、割振年月日はフレックス割振りから
 #   ・様式のブックの外を指す名前（月午前 など。使われていない）は消す。入力規則は消す
 #   ・単位期間（F5〜I5）のほかは入力できないように保護する（パスワードなし）
+#   ・本人・所属長には見せない（veryHidden）。管理者は 休暇申請シートの作成.xlsm の［申告・割振り簿を見る］で見る
 # 使い方：add_flex_book.ps1 -Template 休暇申請シート（ひな形）.xlsx -Source 申告・割振り簿（原本）.xlsx
 param([Parameter(Mandatory = $true)][string]$Template, [Parameter(Mandatory = $true)][string]$Source)
 
@@ -18,7 +19,7 @@ if (-not (Test-Path $Source)) { throw "申告・割振り簿の様式のファ�
 
 $FIRST, $LAST, $PERIOD = 12, 403, 28
 $SIN = "'フレックス申告'"
-$WARI = "'フレックス割振り'"
+$WARI = "'フレックス割振り（所属長確認用）'"
 
 # Excel が計算などで忙しいと COM の呼び出しが断られる（RPC_E_CALL_REJECTED）ので、少し待ってやり直す
 function Retry([scriptblock]$sb) {
@@ -40,9 +41,11 @@ try {
     $widths = @{}
     for ($i = 1; $i -le 60; $i++) { $widths[$i] = [double]$ws.Columns.Item($i).Width }
 
+    # ひな形は式が多く、開くと再計算で Excel が忙しくなる。手動にしてから開き、保存の前に自動に戻す
+    $xl.Calculation = -4135
     $wb = $xl.Workbooks.Open($Template)
     foreach ($s in @($wb.Worksheets)) { if ($s.Name -eq '申告・割振り簿') { throw 'ひな形にもう 申告・割振り簿 シートがあります（make_form.py で作り直してから実行してください）' } }
-    $ws.Copy([Type]::Missing, $wb.Worksheets.Item('フレックス割振り'))
+    $ws.Copy([Type]::Missing, $wb.Worksheets.Item('フレックス割振り（所属長確認用）'))
     $t = $null
     foreach ($s in @($wb.Worksheets)) { if ($s.Name -like 'フレックスタイム制*') { $t = $s } }
     if (-not $t) { throw '写したシートが見つかりません' }
@@ -70,10 +73,11 @@ try {
     $xl.Calculation = -4135    # 手動（式を入れるあいだ再計算しない）
 
     # 1年間の始期・単位期間
-    $t.Range('F4').Formula = '=YEAR(フレックス始期)'
-    $t.Range('H4').Formula = '=MONTH(フレックス始期)'
-    $t.Range('I4').Formula = '=DAY(フレックス始期)'
-    $now = "(フレックス始期+$PERIOD*(MIN(14,MAX(1,INT((TODAY()-フレックス始期)/$PERIOD)+1))-1))"
+    # 1年間の始期：フレックス申告の日ごとの表の最初の日（単位期間1の開始日。なければ管理シートの始期）。行の日がフレックス申告とそろう
+    $t.Range('F4').Formula = "=YEAR($SIN!`$B`$$FIRST)"
+    $t.Range('H4').Formula = "=MONTH($SIN!`$B`$$FIRST)"
+    $t.Range('I4').Formula = "=DAY($SIN!`$B`$$FIRST)"
+    $now = "IFERROR(LOOKUP(2,1/(($SIN!`$AK`$4:`$AX`$4<>"""")*($SIN!`$AK`$4:`$AX`$4<=TODAY())),$SIN!`$AK`$4:`$AX`$4),$SIN!`$B`$$FIRST)"
     $t.Range('F5').Formula = "=YEAR($now)"
     $t.Range('H5').Formula = "=MONTH($now)"
     $t.Range('I5').Formula = "=DAY($now)"
@@ -92,16 +96,17 @@ try {
         $label = [string]$av.Value2
         $p = [math]::Floor(($r - $FIRST) / $PERIOD) + 1        # 単位期間
         $pr = $FIRST + $p - 1                                   # 単位期間の表の行
+        # その行の日を含む単位期間（フレックス申告の A 列の期間番号）の申告年月日・割振年月日
+        $k = "$SIN!`$A$r"
         if ($label -like '申告年月日*') {
-            $t.Range("AW$r").Formula = "=IF(ISNUMBER($SIN!`$AN`$$pr),$SIN!`$AN`$$pr,"""")"
+            $t.Range("AW$r").Formula = "=IFERROR(IF(ISNUMBER(INDEX($SIN!`$AK`$7:`$AX`$7,$k)),INDEX($SIN!`$AK`$7:`$AX`$7,$k),""""),"""")"
         } elseif ($label -like '割振年月日*') {
-            $t.Range("AW$r").Formula = "=IF(ISNUMBER($WARI!`$AP`$$pr),$WARI!`$AP`$$pr,"""")"
+            $t.Range("AW$r").Formula = "=IFERROR(IF(ISNUMBER(INDEX($WARI!`$AK`$9:`$AX`$9,$k)),INDEX($WARI!`$AK`$9:`$AX`$9,$k),""""),"""")"
         } else {
             $av.MergeArea.Cells.Item(1, 1).Formula = "=IF($SIN!`$Z$r="""","""",$SIN!`$Z$r)"
         }
         }
     }
-    $xl.Calculation = -4105    # 自動
 
     # 保護：単位期間（F5〜I5）だけ書ける
     $t.Cells.Locked = $true
@@ -111,9 +116,14 @@ try {
     $win.ScrollRow = 1; $win.ScrollColumn = 1
     [void]$t.Range('F5').Select()
     $t.Protect('', $true, $true, $false, $false, $true, $true, $true)   # 書式（行の高さ・列の幅）の変更はできる
+    $t.Tab.Color = 0xB5752E      # フレックスの色（青）
     $wb.Worksheets.Item(1).Activate()
-    $wb.Save()
-    $wb.Close($false)
+    # 管理者だけが見るシート：本人・所属長には見せない（veryHidden。Excel の［再表示］にも出ない）。
+    # 管理者は 休暇申請シートの作成.xlsm の［申告・割振り簿を見る］で、読み取り専用で開いて表示する
+    $t.Visible = 2
+    Retry { $xl.Calculation = -4105 } | Out-Null    # 自動に戻してから保存する（ファイルに計算方法が残るため）
+    Retry { $wb.Save() } | Out-Null
+    Retry { $wb.Close($false) } | Out-Null
     'added 申告・割振り簿'
 } catch {
     Write-Host $_.InvocationInfo.PositionMessage

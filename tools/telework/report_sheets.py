@@ -3,7 +3,8 @@
 シート：
   テレワーク報告 … 本人が1回1行で書く（提出日・実施日・開始時刻・終了時刻・業務内容・備考）。所属長は同じ行に確認日（とコメント）を入れる。
                    表「テレワーク報告」を 出勤・休暇管理データ が Power Query で読む。
-  テレワーク実施報告書 … 別紙３の様式（A4縦・游明朝）どおりの印刷用。M2 の番号の行を表示する（書き換えられない）。
+  テレワーク実施報告書 … 別紙３の様式（A4縦・游明朝）どおりの印刷用。M2 の番号の行を表示する（式なので保護し、M2 だけ書ける）。
+                         改ページプレビューで印刷の形のまま見せる。入る欄は薄い色（白黒印刷にするので印刷はされない）。
 """
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protection
 from openpyxl.formatting.rule import FormulaRule
@@ -13,6 +14,8 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.worksheet.page import PageMargins
 
 SHEET, PRINT = "テレワーク報告", "テレワーク実施報告書"
+NOWORK_OVERLAP = "・フレックスで割振り済みの「勤務時間を割り振らない日」です（先に確認・割振りされた方が優先）"
+# 休暇との重なりは、テレワーク予定表の予定と照らす（出勤・休暇管理データ の「テレワーク一覧」）。この報告では見ない
 HEAD, ROWS = 6, 200
 FIRST, LAST = HEAD + 1, HEAD + ROWS
 
@@ -39,19 +42,19 @@ UNLOCK = Protection(locked=False)
 COLS = [
     ("番号", 5, "0", fill_calc),
     ("提出日", 11, "yyyy/m/d", fill_staff),
-    ("実施日", 11, "yyyy/m/d", fill_staff),
+    ("実施日", 13, "yyyy/m/d", fill_staff),      # 2026/12/31 のような8桁の日付が入る幅
     ("開始時刻", 8, "h:mm", fill_staff),
     ("終了時刻", 8, "h:mm", fill_staff),
     ("業務内容", 50, None, fill_staff),
     ("備考", 24, None, fill_staff),
-    ("確認日（所属長）", 11, "yyyy/m/d", fill_boss),
+    ("確認日（所属長）", 13, "yyyy/m/d", fill_boss),   # 8桁の日付が入る幅
     ("所属長コメント", 20, None, fill_boss),
     ("確認", 30, None, fill_calc),
 ]
 
 
-def add(wb, MG, TIME_RANGE):
-    """MG は管理シートの名前、TIME_RANGE は時刻の一覧（15分おき）の範囲"""
+def add(wb, MG, TIME_RANGE, OFF_DAYS, LEAVE, NOWORK=None):
+    """MG は管理シートの名前、TIME_RANGE は時刻の一覧（15分おき）の範囲、OFF_DAYS は祝日・年末年始の範囲（土日とあわせて提出日・実施日・確認日にできない）"""
     ws = wb.create_sheet(SHEET)
     for i, (_, width, _, _) in enumerate(COLS, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
@@ -59,14 +62,16 @@ def add(wb, MG, TIME_RANGE):
     ws["A1"].font = f_title
     ws["F1"] = "黄色：本人が入力　青：所属長が入力　灰色：自動　赤：直すところ（理由は「確認」の欄）"
     ws["F1"].font = f_note
-    # 3行目：所属（部・課）と氏名
-    for ref, value, fill in (("A3", "所属", None), ("B3", None, fill_staff), ("C3", "部", None), ("D3", None, fill_staff),
-                             ("E3", "課", None), ("F3", f"=\"氏名：\"&{MG}!$B$2", None)):
-        ws[ref] = value
-        ws[ref].font = f_bold
-        ws[ref].alignment = center if ref != "F3" else left
-        if fill:
-            ws[ref].fill, ws[ref].border, ws[ref].protection = fill, border, UNLOCK
+    # 3行目：所属（B3:E3 を結合した1つの欄に自由に書く。「○○部○○課」でない所属もあるため）と氏名
+    ws["A3"] = "所属"
+    ws["A3"].font, ws["A3"].alignment = f_bold, center
+    ws.merge_cells("B3:E3")
+    for col in "BCDE":
+        ws[f"{col}3"].fill, ws[f"{col}3"].border = fill_staff, border
+    ws["B3"].protection = UNLOCK
+    ws["B3"].font, ws["B3"].alignment = f_bold, Alignment(horizontal="left", vertical="center", shrink_to_fit=True)
+    ws["F3"] = f"=\"氏名：\"&{MG}!$B$2"
+    ws["F3"].font, ws["F3"].alignment = f_bold, left
     ws["A4"] = ("テレワークをしたら、1回1行で書き、所属長に Notes でこのファイルのリンクを送って知らせます。"
                 "所属長は内容を確かめて確認日を入れます。印刷は「テレワーク実施報告書」シート（別紙３の様式）で。")
     ws["A4"].font = f_note
@@ -83,6 +88,10 @@ def add(wb, MG, TIME_RANGE):
             if fill is not fill_calc:
                 c.protection = UNLOCK
     ws.row_dimensions[HEAD].height = 28
+    for r in range(FIRST, LAST + 1):      # 入力の行は3行ぶんの高さ（業務内容などを折り返して書ける）
+        ws.row_dimensions[r].height = 45
+    # フレックスで割振り済みの「勤務時間を割り振らない日」（NOWORK＝(割振年月日の範囲, 日付の範囲)）
+    nowork_hit = lambda c, h: (f'SUMPRODUCT(ISNUMBER({NOWORK[0]})*({NOWORK[1]}={c})*((((1-ISNUMBER({h}))+({NOWORK[0]}<=N({h})))>0)))')
     for r in range(FIRST, LAST + 1):
         a, b, c, d, e, f, g, h = (f"{col}{r}" for col in "ABCDEFGH")
         ws[a] = r - HEAD
@@ -94,17 +103,22 @@ def add(wb, MG, TIME_RANGE):
             f'&IF(AND(ISNUMBER({d}),ISNUMBER({e})),IF({e}<={d},"・終了時刻が開始時刻より前です",""),"")'
             f'&IF({f}="","・業務内容を書いてください","")'
             f'&IF(AND(ISNUMBER({b}),ISNUMBER({c})),IF({c}>{b},"・実施日が提出日より後です",""),"")'
-            f'&IF(AND(ISNUMBER({h}),ISNUMBER({c})),IF({h}<{c},"・確認日が実施日より前です",""),""))'
+            f'&IF(AND(ISNUMBER({h}),ISNUMBER({b})),IF({h}<{b},"・確認日が提出日より前です（提出日と同じ日か、その後にします）",""),"")'
+            + "".join(f'&IF(ISNUMBER({x}),IF(NETWORKDAYS({x},{x},{OFF_DAYS})=0,"・{name}が土日・祝日・年末年始です",""),"")'
+                      for x, name in ((b, "提出日"), (c, "実施日"), (h, "確認日")))
+            + (f'&IF(ISNUMBER({c}),IF({nowork_hit(c, h)}>0,"{NOWORK_OVERLAP}",""),"")' if NOWORK else "")
+            + ")"
         )
         ws[f"J{r}"].font = Font(name=FONT, size=9, color="9C0006")
     any_ = f"COUNTA($B{FIRST}:$G{FIRST})>0"
+    off = lambda col: f"AND(ISNUMBER(${col}{FIRST}),NETWORKDAYS(${col}{FIRST},${col}{FIRST},{OFF_DAYS})=0)"   # 土日・祝日・年末年始
     rules = {
-        "B": f'AND({any_},$B{FIRST}="")',
-        "C": f'OR(AND({any_},$C{FIRST}=""),AND(ISNUMBER($B{FIRST}),ISNUMBER($C{FIRST}),$C{FIRST}>$B{FIRST}))',
+        "B": f'OR(AND({any_},$B{FIRST}=""),{off("B")})',
+        "C": f'OR(AND({any_},$C{FIRST}=""),{off("C")},AND(ISNUMBER($B{FIRST}),ISNUMBER($C{FIRST}),$C{FIRST}>$B{FIRST}))',
         "D": f'AND({any_},$D{FIRST}="")',
         "E": f'OR(AND({any_},$E{FIRST}=""),AND(ISNUMBER($D{FIRST}),ISNUMBER($E{FIRST}),$E{FIRST}<=$D{FIRST}))',
         "F": f'AND({any_},$F{FIRST}="")',
-        "H": f'OR(AND($H{FIRST}<>"",NOT({any_})),AND(ISNUMBER($H{FIRST}),ISNUMBER($C{FIRST}),$H{FIRST}<$C{FIRST}))',
+        "H": f'OR(AND($H{FIRST}<>"",NOT({any_})),{off("H")},AND(ISNUMBER($H{FIRST}),ISNUMBER($B{FIRST}),$H{FIRST}<$B{FIRST}))',
         "J": f'$J{FIRST}<>""',
     }
     for col, rule in rules.items():
@@ -135,8 +149,8 @@ def add(wb, MG, TIME_RANGE):
     ps = wb.create_sheet(PRINT)
     ps.sheet_view.showGridLines = False
     MIN = "游明朝"
-    f11 = Font(name=MIN, size=11)
-    f14 = Font(name=MIN, size=14)
+    f11 = Font(name=MIN, size=12)     # 本文（2026-11-16 ユーザー指示で 11→12）
+    f14 = Font(name=MIN, size=16)     # 表題（14→16）
     for i in range(1, 11):     # A〜J の10列で本文の幅（A4縦・左右25mm）
         ps.column_dimensions[get_column_letter(i)].width = 8.6
     ps.column_dimensions["K"].width = 3
@@ -158,7 +172,7 @@ def add(wb, MG, TIME_RANGE):
     ps.add_data_validation(dv)
     dv.add("M2")
 
-    def line(r, value, font=f11, align=left, merge=("A", "J"), height=18.5):
+    def line(r, value, font=f11, align=left, merge=("A", "J"), height=20):
         ps.merge_cells(f"{merge[0]}{r}:{merge[1]}{r}")
         c = ps[f"{merge[0]}{r}"]
         c.value, c.font, c.alignment = value, font, align
@@ -169,10 +183,11 @@ def add(wb, MG, TIME_RANGE):
     line(1, None)
     line(2, f'="提出日："&{era(pick("B"))}', align=Alignment(horizontal="right", vertical="center"))
     line(3, None)
-    line(4, "テレワーク実施報告書", font=f14, align=Alignment(horizontal="center", vertical="center"), height=24)
-    line(5, None, height=24)
-    line(6, f'="所 属："&IF({T}!$B$3="","　　　",{T}!$B$3)&"部　"&IF({T}!$D$3="","　　　",{T}!$D$3)&"課"')
-    line(7, f'="氏 名："&{MG}!$B$2')
+    line(4, "テレワーク実施報告書", font=f14, align=Alignment(horizontal="center", vertical="center"), height=28)
+    line(5, None)
+    # 所属・氏名は「：」の後を1字下げる
+    line(6, f'="所 属：　"&IF({T}!$B$3="","　　　　　　",{T}!$B$3)')
+    line(7, f'="氏 名：　"&{MG}!$B$2')
     line(8, None)
     line(9, "１　実施日時")
     line(10, f'="　　"&{era(pick("C"))}&"（"&IF(ISNUMBER({pick("C")}),TEXT({pick("C")},"aaa"),"　　")&"）"')
@@ -182,14 +197,14 @@ def add(wb, MG, TIME_RANGE):
     ps.merge_cells("B14:J31")
     ps["B14"] = f'={pick("F")}&""'
     ps["B14"].font, ps["B14"].alignment = f11, top_left
-    for r in range(14, 32):
-        ps.row_dimensions[r].height = 18.5
+    for r in range(14, 32):      # 業務内容の欄（12pt で18行ほど。A4 1枚に縮めずに入る高さ）
+        ps.row_dimensions[r].height = 16
     line(32, "３　備考")
     ps.merge_cells("B33:J36")
     ps["B33"] = f'={pick("G")}&""'
     ps["B33"].font, ps["B33"].alignment = f11, top_left
     for r in range(33, 37):
-        ps.row_dimensions[r].height = 18.5
+        ps.row_dimensions[r].height = 18
     ps.print_area = "A1:J36"
     ps.page_setup.paperSize = ps.PAPERSIZE_A4
     ps.page_setup.orientation = "portrait"
@@ -200,5 +215,18 @@ def add(wb, MG, TIME_RANGE):
     ps.oddHeader.left.text = "別紙３"
     ps.oddHeader.left.font = "游明朝"
     ps.oddHeader.left.size = 10.5
+    # 記入欄（番号の行から入る欄）を薄い色に。白黒印刷にして、色は印刷しない
+    field = PatternFill("solid", fgColor="FFF8E1")
+    for rng in ("A2:J2", "A6:J6", "A7:J7", "A10:J10", "A11:J11", "B14:J31", "B33:J36"):
+        for row in ps[rng]:
+            for c in row:
+                c.fill = field
+    ps.page_setup.blackAndWhite = True
+    # 改ページプレビューで、印刷の形のまま表示する。式を消さないよう保護する（M2 だけ書ける）
+    ps.sheet_view.view = "pageBreakPreview"
+    ps.sheet_view.zoomScale = 100
+    ps.sheet_view.zoomScaleNormal = 100
+    ps.sheet_view.zoomScalePageLayoutView = 100
+    ps.sheet_view.zoomScaleSheetLayoutView = 100
     ps.protection.sheet = True
     return [SHEET, PRINT]

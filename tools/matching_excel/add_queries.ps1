@@ -19,6 +19,7 @@ $helpers = [ordered]@{
     '申請データ'     = Join-Path $queries '申請データ.pq'
     'テレワーク予定表' = Join-Path $teleworkQueries 'テレワーク予定表.pq'
     'フレックス_確定' = Join-Path $queries 'フレックス_確定.pq'     # 表 確定_フレックス日別（下で作る）を読む
+    'QR出勤_ファイル' = Join-Path $queries 'QR出勤_ファイル.pq'       # 出力データ貼付 H3 のフォルダの attendance.xlsx
 }
 # 超過勤務の支給割合ごとの時間の列（超勤_日別.pq・超勤_月.pq と同じ）と、手当対象時間の列
 $otBuckets = @('125', '150', '150（60H前）', '150（+25）', '150（+15）', '135', '160', '175', '175（+25）', '175（+15）',
@@ -44,6 +45,9 @@ $loaded = [ordered]@{
     # テレワーク実施報告（休暇申請シートのテレワーク報告）：全員の報告と所属長の確認・注意
     'テレワーク報告一覧' = @{ Sheet = 'テレワーク報告'; At = 'A3'; Count = ''; Time = @('開始時刻', '終了時刻', '時間'); Date = @('提出日', '実施日', '確認日') }
     '利用予定_日別' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AK8'; Count = 'AK6'; Time = @(); Date = @() }
+    # 出勤管理システムの［Excel出力］のファイル（フォルダで読む）と、つないだ出勤記録（マクロが出力データ貼付に写す）
+    'QR出勤ファイル一覧' = @{ Sheet = 'QR出勤の読み込み'; At = 'A5'; Count = ''; Time = @(); Date = @() }
+    'QR出勤' = @{ Sheet = 'QR出勤の読み込み'; At = 'G5'; Count = ''; Time = @(); Date = @() }
 }
 $settings = @{ 'B2' = $Folder }
 # 折り返して表示する長い文の列と、その幅
@@ -67,6 +71,10 @@ try {
     foreach ($name in $loaded.Keys) {
         $spec = $loaded[$name]
         $ws = $wb.Worksheets.Item($spec.Sheet)
+        # 表を作る前の列の幅（表を作ると見出しに合わせて狭くなることがあるので、あとでこれより狭くしない）
+        $c0 = $ws.Range($spec.At).Column
+        $widthBefore = @{}
+        for ($k = 0; $k -lt 60; $k++) { $widthBefore[$c0 + $k] = [double]$ws.Columns.Item($c0 + $k).ColumnWidth }
         $conn = "OLEDB;Provider=Microsoft.Mashup.OleDb.1;Data Source=`$Workbook`$;Location=`"$name`";Extended Properties=`"`""
         $lo = $ws.ListObjects.Add(0, $conn, $true, 1, $ws.Range($spec.At))
         $lo.Name = $name
@@ -77,6 +85,7 @@ try {
         $qt.BackgroundQuery = $false
         $qt.PreserveFormatting = $true
         $qt.AdjustColumnWidth = ($name -eq '申請一覧' -or $name -eq 'テレワーク報告一覧' -or $name -eq 'テレワーク一覧' -or $name -like '超勤_*' -or ($name -like 'フレックス*' -and $name -ne 'フレックス_出勤簿'))
+        "読み込み中: $name " + (Get-Date -Format 'HH:mm:ss') | Out-Host      # どのクエリで止まったか分かるように
         $qt.Refresh($false) | Out-Null
         # 長い文の列は幅を決めて折り返す（読み直すたびに列の幅を変えない。行の高さは［最新を読み込む］のマクロが合わせる）
         $qt.AdjustColumnWidth = $false
@@ -84,6 +93,7 @@ try {
             # 読み込む前でも、名前・日付・ファイル名などが入る幅にしておく（読み込んだあとは［最新を読み込む］のマクロが中身に合わせる）
             $col = $ws.Columns.Item($lc.Range.Column)
             $min = if ($lc.Name -eq 'ファイル名') { 34 } elseif ($lc.Name -in @('氏名', '所属')) { 14 } else { 11 }
+            if ($widthBefore.ContainsKey($lc.Range.Column) -and $widthBefore[$lc.Range.Column] -gt $min) { $min = $widthBefore[$lc.Range.Column] }
             if ($col.ColumnWidth -lt $min) { $col.ColumnWidth = [double]$min }
             if ($wrapWidth.ContainsKey($lc.Name)) {
                 $ws.Columns.Item($lc.Range.Column).ColumnWidth = [double]$wrapWidth[$lc.Name]
@@ -145,7 +155,7 @@ try {
             foreach ($col in $pair[0]) {
                 if (-not ($heads -contains $col)) { continue }
                 $c = $lo.ListColumns.Item($col).Range.Column
-                $ws.Columns.Item($c).NumberFormat = $pair[1]
+                $ws.Range($ws.Cells.Item($top.Row, $c), $ws.Cells.Item($top.Row + 30000, $c)).NumberFormat = $pair[1]
             }
         }
         # 見出しが入る幅に広げる（もとの幅より狭くはしない）

@@ -2,7 +2,7 @@
 // 出勤用ID と氏名はファイル名から取る（休暇申請シートには見せる欄がないため）。
 // 列：ファイル名・出勤用ID・氏名・申請（その人の申請の表）・超勤（超過勤務等命令簿の月のシートの表「超勤日別」をつないだもの。なければ null）・
 //     フレックス日・フレックス期間（フレックスタイム制のシートの表「フレックス日別」「フレックス期間」。なければ null）・
-//     テレワーク報告（テレワーク実施報告の表「テレワーク報告」と、その人の所属（部・課）。なければ null）・読み取り
+//     テレワーク報告（テレワーク実施報告の表「テレワーク報告」と、その人の所属。なければ null）・読み取り
 let
     // 設定のフォルダとその中のファイルを、他のステップを参照せず1つのステップで読む
     // （Power Query は、データの読み取りと他のステップの参照を同じステップに置くと、設定によって止める）
@@ -29,10 +29,10 @@ let
             // 月のシートを写すと表の名前は 超勤日別2・超勤日別3… になる（超勤ひな形 の表は年月が空なので、使う側で除く）
             超勤の表 = Table.SelectRows(ブック, each [Kind] = "Table" and Text.StartsWith([Item], "超勤日別")),
             超勤 = if Table.IsEmpty(超勤の表) then null else Table.Buffer(Table.Combine(超勤の表[Data])),
-            // テレワーク報告シートの B3（部）・D3（課）
+            // テレワーク報告シートの B3（所属。自由に書く1つの欄）
             所属 = (b as table) => let s = Table.SelectRows(b, each [Kind] = "Sheet" and [Item] = "テレワーク報告")
                 in if Table.IsEmpty(s) then "" else let d = s{0}[Data], 値 = (r, c) => try Text.Trim(Text.From(Record.Field(d{r}, c))) otherwise ""
-                    in Text.Combine(List.Select({値(2, "Column2") & (if 値(2, "Column2") = "" then "" else "部"), 値(2, "Column4") & (if 値(2, "Column4") = "" then "" else "課")}, each _ <> ""), ""),
+                    in 値(2, "Column2"),
             表 = (名 as text) => let t = Table.SelectRows(ブック, each [Kind] = "Table" and [Item] = 名)
                 in if Table.IsEmpty(t) then null else Table.Buffer(t{0}[Data]),
             部分 = 名前の部分(名前)

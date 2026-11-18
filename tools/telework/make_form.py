@@ -24,7 +24,7 @@ FONT = "ＭＳ Ｐゴシック"
 ROWS = 500            # 予定を書ける行数（保護したシートでは表に行を足せないので、先に用意しておく）
 HEAD = 5              # 予定の表の見出しの行
 FIRST, LAST = HEAD + 1, HEAD + ROWS
-KINDS = ["終日", "時間"]      # 区分：1日ずっとテレワーク／時刻を指定（時間単位）
+KINDS = ["終日", "時間", "取消"]      # 区分：1日ずっとテレワーク／時刻を指定（時間単位）／取りやめた予定（行は記録に残し、出勤簿・照合には使わない）
 BREAK_START, BREAK_END = 12 / 24, 13 / 24     # 時間の計算で除く休憩（12:00〜13:00）
 DUPLICATE = "・同じ職員・同じ日の行がほかにもあります"
 
@@ -111,7 +111,7 @@ for r in range(FIRST, LAST + 1):
         f'&IF({c_}="","・日付を入れてください",IF(NOT(ISNUMBER({c_})),"・日付の形で入れてください",'
         f'IF(NETWORKDAYS({c_},{c_},{OFF_DAYS})=0,"・土日・祝日・年末年始です","")))'
         f'&IF({d}="","・区分を選んでください","")'
-        f'&IF(AND({a}<>"",ISNUMBER({c_})),IF(COUNTIFS($A${FIRST}:$A${LAST},{a},$C${FIRST}:$C${LAST},{c_})>1,"{DUPLICATE}",""),"")'
+        f'&IF(AND({a}<>"",ISNUMBER({c_}),{d}<>"取消"),IF(COUNTIFS($A${FIRST}:$A${LAST},{a},$C${FIRST}:$C${LAST},{c_},$D${FIRST}:$D${LAST},"<>取消")>1,"{DUPLICATE}",""),"")'
         f'&IF(AND({d}="時間",OR({e}="",{f}="")),"・開始時刻と終了時刻を入れてください","")'
         f'&IF(AND({d}="終日",OR({e}<>"",{f}<>"")),"・終日に時刻は要りません","")'
         f'&IF(AND({e}<>"",{f}<>""),IF({f}<={e},"・終了時刻が開始時刻より前です",""),""))'
@@ -126,7 +126,7 @@ RED_RULES = {
     "A": f'AND({used},$A{R}="")',
     "C": (f'OR(AND({used},$C{R}=""),AND($C{R}<>"",NOT(ISNUMBER($C{R}))),'
           f'IF(ISNUMBER($C{R}),NETWORKDAYS($C{R},$C{R},{OFF_DAYS})=0,FALSE),'
-          f'AND($A{R}<>"",ISNUMBER($C{R}),COUNTIFS($A${FIRST}:$A${LAST},$A{R},$C${FIRST}:$C${LAST},$C{R})>1))'),
+          f'AND($A{R}<>"",ISNUMBER($C{R}),$D{R}<>"取消",COUNTIFS($A${FIRST}:$A${LAST},$A{R},$C${FIRST}:$C${LAST},$C{R},$D${FIRST}:$D${LAST},"<>取消")>1))'),
     "D": f'AND({used},$D{R}="")',
     "E": f'OR(AND($D{R}="時間",$E{R}=""),AND($D{R}="終日",$E{R}<>""))',
     "F": f'OR(AND($D{R}="時間",$F{R}=""),AND($D{R}="終日",$F{R}<>""),AND($E{R}<>"",$F{R}<>"",$F{R}<=$E{R}))',
@@ -134,6 +134,8 @@ RED_RULES = {
 }
 for col, rule in RED_RULES.items():
     ws.conditional_formatting.add(f"{col}{FIRST}:{col}{LAST}", FormulaRule(formula=[rule], fill=fill_bad, font=font_bad))
+# 取消の行は灰色の文字に取り消し線（記録として残す）
+ws.conditional_formatting.add(f"A{FIRST}:H{LAST}", FormulaRule(formula=[f'$D{R}="取消"'], font=Font(name=FONT, color="A6A6A6", strike=True)))
 # 終日の行の時刻の欄は要らないので灰色に
 ws.conditional_formatting.add(f"E{FIRST}:F{LAST}", FormulaRule(
     formula=[f'AND($D{R}="終日",$E{R}="",$F{R}="")'], fill=PatternFill("solid", fgColor="D9D9D9", bgColor="D9D9D9")))
@@ -149,7 +151,7 @@ def col_cells(col):
 
 
 dv = DataValidation(type="list", formula1='"' + ",".join(KINDS) + '"', allow_blank=True)
-dv.errorTitle, dv.error = "区分", "「終日」か「時間」を選んでください。"
+dv.errorTitle, dv.error = "区分", "「終日」「時間」「取消」から選んでください。"
 ws.add_data_validation(dv)
 dv.add(col_cells("D"))
 dv = DataValidation(type="list", allow_blank=True, imeMode="halfAlpha", formula1=TIME_RANGE)
@@ -194,12 +196,12 @@ for i, text in enumerate([
     "・職員からテレワークの利用の申し出（口頭やメール）を受けたら、この表に予定を書きます。承認の欄はありません。",
     "・1人1日1行です。出勤用ID・日付・区分を書きます。氏名は確認用で、書かなくてもかまいません（システムは出勤用ID で照合します）。",
     "・区分が「時間」のときは、開始時刻・終了時刻を書きます。時間は12:00〜13:00の休憩を除いて自動で入ります。",
-    "・予定が変わったら、その行を書き直すか、行の中身を消してください（行ごと削除してもかまいません）。",
+    "・予定が変わったら、その行を書き直します。予定を取りやめたときは、区分を「取消」にします（行は灰色の取り消し線で記録に残り、出勤簿・照合には使いません。同じ日に新しい予定を書いてもかまいません）。",
     "・足りない欄や誤りのある欄は赤くなり、理由が「確認」の欄に出ます。",
     "",
     "■ 管理者",
     "・このファイルは管理者の OneDrive にあり、所属長にだけ共有しています。ファイル名は「テレワーク予定表　所属名.xlsx」（全角スペース区切り）にします。",
-    "・出勤・休暇管理データ が、保存された内容を開いたとき（または［申請を取り込む］）に読み込み、出勤簿の出勤欄に「テレ」、時間のテレワークは備考に時刻を表示します。",
+    "・出勤・休暇管理データ が、保存された内容を目次の［最新を読み込む］を押したときに読み込み、出勤簿の出勤欄に「テレ」、時間のテレワークは備考に時刻を表示します。",
     "・全員の予定と注意（名簿にない出勤用ID、休暇と重なる日など）は、出勤・休暇管理データ の「テレワーク一覧」シートで確かめます。",
 ], start=3):
     us[f"A{i}"] = text

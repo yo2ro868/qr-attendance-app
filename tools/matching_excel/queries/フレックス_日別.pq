@@ -1,5 +1,5 @@
 // 休暇申請シートのフレックスタイム制の表（フレックス日別・フレックス期間。tools/flex）を、今の内容で1日1行にする。
-// フレックスを使っている人（申告年月日を入れた単位期間がある人）だけ。時刻・時間は Excel の時間（1日＝1）にする。
+// フレックスを使っている人（申告年月日を入れた単位期間がある人）の、単位期間に入る日だけ。時刻・時間は Excel の時間（1日＝1）にする。
 // 「フレックスの読み込み」シートに出し、［最新を読み込む］のマクロが、所属長の承認済みになった単位期間をここから「フレックスの日別」に写す。
 let
     正規ID = (id) => let t = Text.Trim(if id = null then "" else Text.From(id))
@@ -16,7 +16,8 @@ let
             期間の情報 = (k) => let hit = List.Select(期間, each 数([期間]) = k) in if List.IsEmpty(hit) then null else hit{0},
             p値 = (p, 名) => if p = null then null else Record.FieldOrDefault(p, 名)
         in
-            if not 使う then {} else List.Transform(Table.ToRecords(f[フレックス日]), (d) =>
+            // 単位期間に入らない日（期間番号が空）は読まない
+            if not 使う then {} else List.Transform(List.Select(Table.ToRecords(f[フレックス日]), each 数([期間]) <> null), (d) =>
                 let k = 数(d[期間]), p = 期間の情報(k)
                 in [出勤用ID = 正規ID(f[出勤用ID]), 氏名 = f[氏名], 所属 = 文字(p値(p, "所属")),
                     期間 = k, 期間の開始日 = 日付にする(p値(p, "開始日")), 日付 = 日付にする(d[日付]), 区分 = 文字(d[区分]),

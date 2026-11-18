@@ -11,7 +11,7 @@
 python tools\telework\make_form.py テレワーク予定表（ひな形）.xlsx
 ```
 
-引き渡し一式（`python tools\leave_sheet\make_package.py`）にも、ひな形と `手順書（テレワーク）.html` が入ります。
+引き渡し一式（`python tools\leave_sheet\make_package.py`）にも、ひな形が入ります。手順は、まとめた手順書（tools/leave_sheet/手順書.html の「テレワーク」）にあります。
 
 ## 予定表の作り
 

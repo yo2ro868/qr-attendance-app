@@ -2,6 +2,7 @@
 // 取り込み：所属長の承認済み（状態が「承認済み」）で、まだ取り込んでいないか、割振年月日が取り込んだときより新しい（承認し直した）単位期間は
 //   「取り込む」。［最新を読み込む］のマクロがその単位期間を「フレックスの日別」に写す（写した内容は、あとで申告が変わっても変わらない）。
 // 注意：取り込んだ後に申告が変わったもの（承認時の内容＝取り込んだ内容を使う）、始まった（1週間以内に始まる）のに承認されていない単位期間など。
+// 照合の注意：取り込んだ日ごとの行（フレックスの日別）の「注意」がある日（出勤の記録がない勤務日など）。注意の文ごとに日付を8日まで、ほかは日数。
 let
     文字 = (v) => if v = null then "" else Text.Trim(Text.From(v)),
     日付にする = (v) => if v = null then null else if v is date then v else if v is datetime then DateTime.Date(v)
@@ -32,6 +33,14 @@ let
             確 = 確定を引く(k),
             確の割振 = if 確 = null then null else 日付にする(確{0}[割振年月日]),
             確の日時 = if 確 = null then null else List.Max(List.Transform(確, each [確定日時])),
+            注意の日 = if 確 = null then {} else List.Sort(List.Select(確, each 文字(Record.FieldOrDefault(_, "注意", null)) <> ""),
+                (x, y) => Value.Compare(日付にする(x[日付]), 日付にする(y[日付]))),
+            月日 = (r) => let d = 日付にする(r[日付]) in if d = null then "" else Text.From(Date.Month(d)) & "/" & Text.From(Date.Day(d)),
+            文の一覧 = List.Distinct(List.Transform(注意の日, each Text.TrimEnd(文字([注意]), "。"))),
+            v照合 = Text.Combine(List.Transform(文の一覧, (msg) =>
+                let ds = List.Select(注意の日, each Text.TrimEnd(文字([注意]), "。") = msg)
+                in msg & "（" & Text.Combine(List.Transform(List.FirstN(ds, 8), 月日), "・")
+                    & (if List.Count(ds) > 8 then " ほか " & Text.From(List.Count(ds) - 8) & " 日" else "") & "）"), "／"),
             取り込む = v状態 = "承認済み" and (確 = null or (割振 <> null and (確の割振 = null or 割振 > 確の割振))),
             始まる = 開始 <> null and 開始 <= Date.AddDays(今日, 7) and (終了 = null or 終了 >= 今日),
             v注意 = if 取り込む then ""
@@ -45,11 +54,11 @@ let
             [出勤用ID = 文字(a[出勤用ID]), 氏名 = 文字(a[氏名]), 所属 = 文字(a[所属]), 期間 = a[期間], 開始日 = 開始, 終了日 = 終了,
              合計 = v合計, 申告年月日 = 日付にする(a[申告年月日]), 割振年月日 = 割振, 状態 = v状態,
              取り込み = if 取り込む then "取り込む" else if 確 <> null then "取り込み済み" else "",
-             取り込んだ日時 = 確の日時, 注意 = v注意, ファイル名 = 文字(a[ファイル名]), 表示する = 確 <> null or v状態 <> "未申告" or 始まる],
+             取り込んだ日時 = 確の日時, 注意 = v注意, 照合の注意 = v照合, ファイル名 = 文字(a[ファイル名]), 表示する = 確 <> null or v状態 <> "未申告" or 始まる],
     行 = List.Transform(Table.ToRecords(今), each 一つ([キー], [行])),
     型 = type table [出勤用ID = text, 氏名 = text, 所属 = text, 期間 = nullable number, 開始日 = nullable date, 終了日 = nullable date,
                     合計 = number, 申告年月日 = nullable date, 割振年月日 = nullable date, 状態 = text, 取り込み = text,
-                    取り込んだ日時 = nullable datetime, 注意 = text, ファイル名 = text, 表示する = logical],
+                    取り込んだ日時 = nullable datetime, 注意 = text, 照合の注意 = text, ファイル名 = text, 表示する = logical],
     表 = if List.IsEmpty(行) then #table(型, {}) else Table.FromRecords(行, 型),
     出す = Table.RemoveColumns(Table.SelectRows(表, each [表示する]), {"表示する"})
 in

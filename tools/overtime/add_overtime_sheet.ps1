@@ -20,6 +20,14 @@ $PREV = '$BH$1'      # 前月の最終日の退庁時刻（マクロが式を書
 $table = 'BJ'        # 表「超勤日別」の左上（見出し）
 $TOP, $BOTTOM = 5, 66    # 日ごとの行（1日に2行。d 日は 5+2(d-1) 行目から）
 
+# Excel が計算などで忙しいと COM の呼び出しが断られる（RPC_E_CALL_REJECTED）ので、少し待ってやり直す
+function Retry([scriptblock]$sb) {
+    for ($i = 0; $i -lt 100; $i++) {
+        try { return & $sb } catch { if ($_.Exception.HResult -eq -2147418111) { Start-Sleep -Milliseconds 300 } else { throw } }
+    }
+    throw 'Excel が応答しません'
+}
+
 $xl = New-Object -ComObject Excel.Application
 $xl.DisplayAlerts = $false
 $xl.Visible = $false
@@ -68,12 +76,15 @@ try {
     for ($i = 1; $i -le 80; $i++) { $widths[$i] = [double]$ws.Columns.Item($i).Width }
 
     # ----- ひな形に写す -----
+    # ひな形は式が多く、開くと再計算で Excel が忙しくなる。手動にしてから開き、保存の前に自動に戻す
+    $xl.Calculation = -4135
     $wb = $xl.Workbooks.Open($Template)
     foreach ($s in @($wb.Worksheets)) { if ($s.Name -eq '超勤ひな形') { throw 'ひな形にもう 超勤ひな形 シートがあります（make_form.py で作り直してから実行してください）' } }
     $usage = $wb.Worksheets.Item('使い方')
     $ws.Copy($usage)
     $t = $wb.ActiveSheet     # 写したシート（Worksheets の番号は非表示のシートでずれることがあるので使わない）
     $t.Name = '超勤ひな形'
+    $t.Tab.Color = 0xA03070      # 超過勤務の色（紫）。月のシートはこれを写すので同じ色
     $src.Close($false)
     $src = $null
 
@@ -100,6 +111,8 @@ try {
         }
     }
     $t.Range('R69').Formula = "='管理'!`$B`$2&"""""     # 氏名
+    # 所属長の氏名：確認日（AC69）を入れると、管理シートの所属長氏名（職員名簿から）が出る。所属長が上書きもできる
+    $t.Range('AC70').Formula = "=IF(ISNUMBER(`$AC`$69),'管理'!`$B`$15&"""","""")"
     # 前月・当月の最終日の退庁時刻
     $t.Range('BG1').Value2 = '前月の最終日の退庁時刻'
     $t.Range('BG2').Value2 = 'この月の最終日の退庁時刻'
@@ -150,12 +163,12 @@ try {
     foreach ($h in $cols.Keys) { $t.Cells.Item(4, $c0 + $i).Value2 = [string]$h; $i++ }
     for ($d = 1; $d -le 31; $d++) { $t.Cells.Item(4 + $d, $c0).Value2 = [double]$d }
     $rng = $t.Range($t.Cells.Item(4, $c0), $t.Cells.Item(35, $c0 + $cols.Count - 1))
-    $lo = $t.ListObjects.Add(1, $rng, $null, 1)     # xlSrcRange, 見出しあり
-    $lo.Name = '超勤日別'
-    $lo.TableStyle = ''
+    $lo = Retry { $t.ListObjects.Add(1, $rng, $null, 1) }     # xlSrcRange, 見出しあり
+    Retry { $lo.Name = '超勤日別' } | Out-Null
+    Retry { $lo.TableStyle = '' } | Out-Null
     $i = 0
     foreach ($h in $cols.Keys) {
-        if ($cols[$h]) { $lo.ListColumns.Item($i + 1).DataBodyRange.Formula = $cols[$h] }
+        if ($cols[$h]) { $f = $cols[$h]; $n = $i + 1; Retry { $lo.ListColumns.Item($n).DataBodyRange.Formula = $f } | Out-Null }
         $i++
     }
     $t.Range($t.Cells.Item(1, $t.Range('BG1').Column), $t.Cells.Item(1, $c0 + $cols.Count - 1)).EntireColumn.Hidden = $true
@@ -172,8 +185,9 @@ try {
     $t.Protect('', $true, $true, $false, $false, $true, $true, $true)   # 書式（行の高さ・列の幅）の変更はできる
     $wb.Worksheets.Item(1).Activate()
     $t.Visible = 2      # xlSheetVeryHidden：本人・所属長には見えない。マクロがこれを写して月のシートを作る
-    $wb.Save()
-    $wb.Close($false)
+    Retry { $xl.Calculation = -4105 } | Out-Null    # 自動に戻してから保存する（ファイルに計算方法が残るため）
+    Retry { $wb.Save() } | Out-Null
+    Retry { $wb.Close($false) } | Out-Null
     "added 超勤ひな形 from $Sheet (formulas changed: $changed)"
 } catch {
     Write-Host $_.InvocationInfo.PositionMessage

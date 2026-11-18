@@ -3,7 +3,7 @@
 #   2. add_ignored_errors.py … 入力欄の「数値が文字列として保存されています」警告を出さない設定を入れる
 #   3. add_queries.ps1       … Excel で休暇申請シートを読む Power Query を入れる（休暇申請シートの読み込みシート）
 #   4. finalize.ps1          … Excel で再計算して保存する（開いたときに値が入った状態にする）
-#   5. add_buttons.ps1       … ［申請を取り込む］ボタンを付けて .xlsm で保存し、取り込むマクロの .bas を同じフォルダに置く
+#   5. add_buttons.ps1       … ［申請を取り込む］などのボタンを付けて .xlsm で保存し、取り込むマクロの .bas を同じフォルダに置く
 # 使い方：powershell -ExecutionPolicy Bypass -File tools\matching_excel\build.ps1 [-Out 出力先.xlsm] [-Folder 確認用の休暇申請シートフォルダ] [-TeleworkFolder 確認用のテレワーク予定表フォルダ]
 param([string]$Out = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')) '出勤・休暇管理データ.xlsm'), [string]$Folder = '', [string]$TeleworkFolder = '')
 

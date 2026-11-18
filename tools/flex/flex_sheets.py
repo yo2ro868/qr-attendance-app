@@ -3,7 +3,7 @@
 シート：
   フレックス申告 … 本人が入力。1年間（始期から392日＝4週間×14の単位期間）の日ごとの勤務開始・終了・休憩（時と分を別の欄）と、
                    単位期間ごとの申告年月日。
-  フレックス割振り … 所属長が確認する。申告をそのまま写した日ごとの表と、単位期間ごとの承認・割振年月日。
+  フレックス割振り（所属長確認用） … 所属長が確認する。申告をそのまま写した日ごとの表と、単位期間ごとの承認・割振年月日。
   フレックス表（非表示）… 出勤・休暇管理データ が Power Query で読む表「フレックス日別」「フレックス期間」（時刻・時間は分）。
 様式どおりの完成版のシート「申告・割振り簿」は tools/flex/add_flex_book.ps1 が、総務課の様式の Excel から作って足す。
 
@@ -33,7 +33,7 @@ NO_WORK = "勤務時間を割り振らない日"
 REMARKS = [NO_WORK, "年次休暇"]
 APPROVE = "承認"
 
-SIN, WARI, HYO = "フレックス申告", "フレックス割振り", "フレックス表"
+SIN, WARI, HYO = "フレックス申告", "フレックス割振り（所属長確認用）", "フレックス表"
 S, W = f"'{SIN}'", f"'{WARI}'"
 
 # 日ごとの表の列（フレックス申告・フレックス割振りで同じ）：A 期間、B 勤務日、C 曜日、D〜W 時刻（時・分の2列ずつ×10）、
@@ -43,10 +43,20 @@ TIME_ITEMS = [("コアタイム", "開始"), ("コアタイム", "終了"), ("�
 TIME_COLS = [(get_column_letter(4 + 2 * i), get_column_letter(5 + 2 * i)) for i in range(10)]   # (時, 分)
 (CS, CE, WS, WE, B1S, B1E, B2S, B2E, B3S, B3E) = TIME_COLS
 HOURS, MINS, NOTE, CHECK = "X", "Y", "Z", "AA"
+# 「勤務時間を割り振らない日」で割振り（承認）済みの日の割振年月日（フレックス表の AF 列。行はフレックス申告と同じ。ほかの日は空欄）。
+# 休暇申請・テレワーク報告の重なりの確認に使う（先に承認・確認・割振りされた方が優先）
+NOWORK_COL = "AF"
+NOWORK_RANGE = f"'{HYO}'!${NOWORK_COL}${FIRST}:${NOWORK_COL}${LAST}"
+DAY_RANGE = f"'{SIN}'!$B${FIRST}:$B${LAST}"
+NOWORK_MARK = "※"      # 確認の欄の、承認を止めない注意（単位期間の「入力に誤りがあります」に数えない）
 OFF, WEEKEND, T_START, T_END, T_BREAK, T_WORK, T_BREAKS = "AB", "AC", "AD", "AE", "AF", "AG", "AH"
-# 単位期間の表（右側。11 行目が見出し、12〜25 行目が期間 1〜14）
-P_HEAD = 11
-P_COLS = ["AJ", "AK", "AL", "AM", "AN", "AO", "AP", "AQ"]
+# 単位期間の表（右上。日ごとの表を下にスクロールしても見えるよう、固定した 3〜11 行目に横に並べる）：AJ 列が見出し、AK〜AX 列が期間 1〜14。
+# 単位期間は本人が開始日を入れ、終了日は開始日＋27日。日ごとの行の期間番号は、その日を含む単位期間。日ごとの表は単位期間1の開始日から始まる
+PCOL = lambda k: get_column_letter(36 + k)       # 期間 k の列（AK〜AX）
+PK1, PKN = "AK", "AX"
+SR_NO, SR_START, SR_END, SR_TOTAL, SR_DECL, SR_STATUS = 3, 4, 5, 6, 7, 8      # 申告：8〜11 行目が状態
+WR_APPROVE, WR_ALLOC, WR_STATUS = 8, 9, 10                                    # 割振り：3〜7 は申告と同じ、10〜11 行目が状態
+prow = lambda row: f"${PK1}${row}:${PKN}${row}"
 
 FONT = "ＭＳ Ｐゴシック"
 f_base = Font(name=FONT, size=10)
@@ -78,7 +88,7 @@ def minutes_of(h, m, r):
     return f'IF(COUNT({h}{r})=0,"",{h}{r}*60+N({m}{r}))'
 
 
-def add(wb, MG, OFF_DAYS):
+def add(wb, MG, OFF_DAYS, LEAVE, TW):
     """MG は管理シートの名前（'管理'）、OFF_DAYS は祝日・年末年始の範囲"""
     mg = wb[MG.strip("'")]
     mg["A12"], mg["B12"] = "フレックスの1年間の始期", FLEX_START
@@ -89,6 +99,15 @@ def add(wb, MG, OFF_DAYS):
     sin = wb.create_sheet(SIN)
     wari = wb.create_sheet(WARI)
     hyo = wb.create_sheet(HYO)
+
+    def notes(ws, texts):
+        """6〜7 行目の説明（A〜AI を結合して折り返す）"""
+        for r, text in zip((6, 7), texts):
+            ws.merge_cells(f"A{r}:AI{r}")
+            ws[f"A{r}"] = text
+            ws[f"A{r}"].font = f_note
+            ws[f"A{r}"].alignment = Alignment(wrap_text=True, vertical="center")
+            ws.row_dimensions[r].height = 26
 
     def day_frame(ws, title, legend):
         ws["A1"] = title
@@ -107,7 +126,7 @@ def add(wb, MG, OFF_DAYS):
         ws.column_dimensions[CHECK].width = 34
         for c in (OFF, WEEKEND, T_START, T_END, T_BREAK, T_WORK, T_BREAKS):
             ws.column_dimensions[c].hidden = True
-        ws.column_dimensions["AI"].width = 2
+        ws.column_dimensions["AI"].width = 2         # 日ごとの行では、その日の承認済みの休暇の行の番号（文字は見せない）
         # 見出し（8〜11行目）：8 グループ、9 項目、10 開始・終了、11 時・分
         def head(ref1, ref2, text):
             if ref1 != ref2:
@@ -145,7 +164,7 @@ def add(wb, MG, OFF_DAYS):
     for r, (label, value, fill) in enumerate([
         ("所属", None, fill_staff),
         ("氏名", f"={MG}!$B$2&\"\"", fill_calc),
-        ("1年間の始期", f"={START}", fill_calc),
+        ("表の最初の日", f"=$B${FIRST}", fill_calc),
     ], start=3):
         sin[f"A{r}"] = label
         sin.merge_cells(f"A{r}:C{r}")
@@ -160,24 +179,36 @@ def add(wb, MG, OFF_DAYS):
     sin["D5"].number_format = 'yyyy"年"m"月"d"日"'
     for col in "DEFGHIJKLM":
         sin[f"{col}3"].protection = UNLOCK
-    sin["O3"] = ("・単位期間（4週間）ごとに、勤務開始・終了と休憩を時と分に分けて書きます。勤務しない日は時刻を消し、備考に「勤務時間を割り振らない日」と書きます。")
-    sin["O4"] = ("・コアタイム（10:00〜12:00）と、祝日・年末年始の行は入っています（変えません）。単位期間の合計が 155時間 になるようにします。")
-    sin["O5"] = ("・書いたら、右の表の申告年月日を入れて、所属長に伝えます。承認の後で書き直したら、申告年月日を書き直した日にします（所属長が承認し直します）。")
-    for ref in ("O3", "O4", "O5"):
-        sin[ref].font = f_note
-    sin["A6"] = "コアタイム免除日など、入力できない欄を変えたいときは総務課に連絡してください。"
-    sin["A6"].font = f_note
+    notes(sin, [
+        "・右上の表に単位期間（4週間）の開始日を入れます（終了日は自動）。日ごとの表は単位期間1の開始日から始まります。勤務開始・終了と休憩を時と分に分けて書き、"
+        "勤務しない日は時刻を消して備考に「勤務時間を割り振らない日」と書きます。",
+        "・コアタイム（10:00〜12:00）と祝日・年末年始は既定のまま変えません。単位期間の合計を155時間にし、右上の申告年月日を入れて所属長に伝えます"
+        "（承認の後で書き直したら、申告年月日も書き直した日にします）。コアタイム免除日など、入力できない欄を変えたいときは総務課へ。",
+    ])
 
     for r in range(FIRST, LAST + 1):
         i = r - FIRST
         b = f"$B{r}"
-        sin[f"A{r}"] = f"=INT(({b}-{START})/{PERIOD})+1"
-        sin[f"B{r}"] = f"={START}+{i}" if i == 0 else f"=B{r - 1}+1"
+        # その日を含む単位期間の番号（重なっているときは先の単位期間。どれにも入らなければ空欄）
+        sin[f"A{r}"] = (f'=IFERROR(INDEX({prow(SR_NO)},MATCH(1,INDEX(({prow(SR_START)}<>"")'
+                        f'*({prow(SR_START)}<={b})*({prow(SR_END)}>={b}),0),0)),"")')
+        sin[f"B{r}"] = (f"=IF(ISNUMBER(${PCOL(1)}${SR_START}),${PCOL(1)}${SR_START},{START})" if i == 0 else f"=B{r - 1}+1")
         sin[f"C{r}"] = f'=TEXT({b},"(aaa)")'
         sin[f"B{r}"].number_format = 'm"月"d"日"'
         # 休日（祝日・年末年始で平日）と週休日（土日）
         sin[f"{WEEKEND}{r}"] = f"=IF(WEEKDAY({b},2)>=6,1,0)"
         sin[f"{OFF}{r}"] = f"=IF(AND({WEEKEND}{r}=0,COUNTIF({OFF_DAYS},{b})>0),1,0)"
+        # その日の承認済みの休暇（休暇申請の表の何番目の行か）。土日・祝日は、土日祝でも取れる休暇だけ
+        lv = lambda col: f"'{LEAVE[0]}'!${col}${LEAVE[1]}:${col}${LEAVE[2]}"
+        sin[f"AI{r}"] = (f'=IFERROR(MATCH(1,INDEX(({lv("L")}="承認")*ISNUMBER({lv("E")})*({lv("E")}<={b})*({lv("W")}>={b})'
+                         f'*((({lv("R")}>0)+(({WEEKEND}{r}+{OFF}{r})=0))>0),0),0),"")')
+        sin[f"AI{r}"].number_format = ";;;"
+        own = f"'{HYO}'!${NOWORK_COL}{r}"
+        tw = lambda col: f"'{TW[0]}'!${col}${TW[1]}:${col}${TW[2]}"
+        # 備考の既定：承認済みの休暇（種別があれば種別、時間・分単位なら時刻も）。承認を取り消すと消える
+        ix = f"$AI{r}"
+        sin[f"{NOTE}{r}"] = (f'=IF(ISNUMBER({ix}),IF(INDEX({lv("C")},{ix})<>"",INDEX({lv("C")},{ix}),INDEX({lv("B")},{ix}))'
+                             f'&IF(INDEX({lv("Z")},{ix})=1,""," "&INDEX({lv("U")},{ix})),"")')
         wd = f"${WEEKEND}{r}=0"
         # コアタイム（変えない）と既定の時刻（本人が書き換える。土日は空欄）
         for (h, m), v in ((CS, CORE[0]), (CE, CORE[1]), (WS, WORK[0]), (WE, WORK[1]), (B1S, BREAK[0]), (B1E, BREAK[1])):
@@ -208,7 +239,8 @@ def add(wb, MG, OFF_DAYS):
         need_extra = (f'AND({wk}<>"",OR(AND({st}<{EXTRA_BREAK[0]},{wk}>{EXTRA_BREAK[1]}),{en}>{EXTRA_BREAK[2]}),{T_BREAKS}{r}<2)')
         default_changed = (f'OR({st}<>{WORK[0]},{en}<>{WORK[1]},{T_BREAK}{r}<>{BREAK[1] - BREAK[0]},{T_BREAKS}{r}<>1)')
         sin[f"{CHECK}{r}"] = (
-            f'=IF(({st}="")<>({en}=""),"・勤務開始と勤務終了の両方を書いてください","")'
+            f'=IF($A{r}="","",'
+            f'IF(({st}="")<>({en}=""),"・勤務開始と勤務終了の両方を書いてください","")'
             f'&IF(AND({st}<>"",{en}<>""),IF({en}<={st},"・勤務終了が勤務開始より前です",""),"")'
             f'&IF(AND({st}<>"",{en}<>""),IF(OR({st}<{FLEXIBLE[0]},{en}>{FLEXIBLE[1]}),"・勤務は5:00〜22:00の間にしてください",""),"")'
             f'&IF(AND({st}<>"",{en}<>"",COUNT({CS[0]}{r})>0),IF(OR({st}>{core_s},{en}<{core_e}),"・コアタイムに勤務していません",""),"")'
@@ -220,6 +252,11 @@ def add(wb, MG, OFF_DAYS):
             f'&IF(AND({WEEKEND}{r}=0,{OFF}{r}=0,{st}="",{en}="",ISERROR(SEARCH("割り振らない",{NOTE}{r}))),'
             f'"・勤務しない日は備考に「{NO_WORK}」と書いてください","")'
             f'&IF(AND({st}<>"",ISNUMBER(SEARCH("割り振らない",{NOTE}{r}))),"・勤務を割り振った日です（備考を確かめてください）","")'
+            # 割り振らない日に、先に承認された休暇・先に確認されたテレワーク（この単位期間が割振り前か、割振年月日が同じ日か後）。承認は止めない
+            f'&IF(AND(ISNUMBER(SEARCH("割り振らない",{NOTE}{r})),'
+            f'SUMPRODUCT(({lv("L")}="承認")*ISNUMBER({lv("E")})*({lv("E")}<={b})*({lv("W")}>={b})*((((1-ISNUMBER({own}))+({lv("M")}<=N({own})))>0)))'
+            f'+SUMPRODUCT(ISNUMBER({tw("H")})*({tw("C")}={b})*((((1-ISNUMBER({own}))+({tw("H")}<=N({own})))>0)))>0),'
+            f'"{NOWORK_MARK}承認済みの休暇・確認済みのテレワークがある日です（先に承認・確認・割振りされた方が優先）",""))'
         )
         for c in range(1, 28):
             cell = sin.cell(row=r, column=c)
@@ -235,16 +272,21 @@ def add(wb, MG, OFF_DAYS):
         sin[f"{NOTE}{r}"].protection = UNLOCK
         sin[f"{NOTE}{r}"].font = Font(name=FONT, size=9, color="C00000")
         sin.row_dimensions[r].height = 15
-        # 単位期間の最後の日の下に太い線
-        if (i + 1) % PERIOD == 0:
-            for c in range(1, 28):
-                cell = sin.cell(row=r, column=c)
-                cell.border = Border(left=thin, right=thin, top=thin, bottom=Side(style="medium", color="1E3A5F"))
 
+    # 単位期間に入らない日は薄い灰色の文字、単位期間の最後の日の下に線（開始日によって変わるので条件付き書式で）
+    from openpyxl.styles.differential import DifferentialStyle
+    sin.conditional_formatting.add(f"A{FIRST}:{CHECK}{LAST}", FormulaRule(
+        formula=[f'$A{FIRST}=""'], font=Font(color="A6A6A6")))
+    sin.conditional_formatting.add(f"A{FIRST}:{CHECK}{LAST}", FormulaRule(
+        formula=[f'AND($A{FIRST}<>"",$B{FIRST}=INDEX({prow(SR_END)},$A{FIRST}))'],
+        border=Border(bottom=Side(style="thin", color="1E3A5F"))))
     # 赤：確認の文があれば、その行の勤務・休憩の欄と確認の欄
     sin.conditional_formatting.add(f"{WS[0]}{FIRST}:{B3E[1]}{LAST}",
                                    FormulaRule(formula=[f'AND(${CHECK}{FIRST}<>"",{WS[0]}{FIRST}&""<>"")'], fill=fill_bad, font=font_bad))
-    sin.conditional_formatting.add(f"{CHECK}{FIRST}:{CHECK}{LAST}", FormulaRule(formula=[f'${CHECK}{FIRST}<>""'], fill=fill_bad, font=font_bad))
+    sin.conditional_formatting.add(f"{CHECK}{FIRST}:{CHECK}{LAST}", FormulaRule(formula=[f'AND(${CHECK}{FIRST}<>"",LEFT(${CHECK}{FIRST},1)<>"{NOWORK_MARK}")'], fill=fill_bad, font=font_bad))
+    # ※ の注意（承認を止めない）は薄い橙
+    sin.conditional_formatting.add(f"{CHECK}{FIRST}:{CHECK}{LAST}", FormulaRule(formula=[f'LEFT(${CHECK}{FIRST},1)="{NOWORK_MARK}"'],
+                                   fill=PatternFill("solid", fgColor="FCE4D6", bgColor="FCE4D6")))
     sin.conditional_formatting.add(f"{NOTE}{FIRST}:{NOTE}{LAST}",
                                    FormulaRule(formula=[f'ISNUMBER(SEARCH("備考",${CHECK}{FIRST}))'], fill=fill_bad, font=font_bad))
     # 土日・祝日・年末年始の行は灰色
@@ -296,26 +338,40 @@ def add(wb, MG, OFF_DAYS):
 
     # 単位期間の表（L 列から）：期間・開始日・終了日・合計（分）・誤り・申告年月日・承認・割振年月日・状態・所属・所属長氏名
     per_heads = ["期間", "開始日", "終了日", "合計", "誤り", "申告年月日", "承認", "割振年月日", "状態", "所属", "所属長氏名", "異動後の所属長氏名"]
+    # 割り振らない日で、単位期間が割振り済み（承認・割振年月日あり・申告年月日が割振年月日より後でない）なら、その割振年月日。
+    # 単位期間の状態（確認の欄の誤りを数える）は使わない（確認の欄がこの列を使うので、循環しないように）
+    for r in range(FIRST, LAST + 1):
+        kk = f"{S}!$A{r}"
+        alloc_k = f"INDEX({W}!${PK1}${WR_ALLOC}:${PKN}${WR_ALLOC},{kk})"
+        hyo[f"{NOWORK_COL}{r}"] = (f'=IFERROR(IF(AND(ISNUMBER(SEARCH("割り振らない",{S}!${NOTE}{r})),INDEX({W}!${PK1}${WR_APPROVE}:${PKN}${WR_APPROVE},{kk})="{APPROVE}",'
+                                    f'ISNUMBER({alloc_k}),N(INDEX({S}!${PK1}${SR_DECL}:${PKN}${SR_DECL},{kk}))<={alloc_k}),{alloc_k},""),"")')
     PL = 12   # L 列
     for i, h in enumerate(per_heads):
         hyo.cell(row=1, column=PL + i, value=h)
     for k in range(1, N_PERIODS + 1):
         t = k + 1
-        r1, r2 = FIRST + (k - 1) * PERIOD, FIRST + k * PERIOD - 1
-        pr = FIRST + k - 1      # 申告・割振りの単位期間の表の行
+        pc = PCOL(k)            # 申告・割振りの単位期間の表の列
         c = lambda i: get_column_letter(PL + i)
-        total = f"SUM({S}!${T_WORK}${r1}:${T_WORK}${r2})"
-        errors = f'SUMPRODUCT(--({S}!${CHECK}${r1}:${CHECK}${r2}<>""))'
-        declared = f"{S}!$AN${pr}"
-        approved = f"{W}!$AO${pr}"
-        alloc = f"{W}!$AP${pr}"
-        status = (f'IF(NOT(ISNUMBER({declared})),"未申告",'
+        start, end = f"{S}!${pc}${SR_START}", f"{S}!${pc}${SR_END}"
+        total = f"SUMIFS({S}!${T_WORK}${FIRST}:${T_WORK}${LAST},{S}!$A${FIRST}:$A${LAST},{k})"
+        errors = (f'COUNTIFS({S}!$A${FIRST}:$A${LAST},{k},{S}!${CHECK}${FIRST}:${CHECK}${LAST},"?*")'
+                  f'-COUNTIFS({S}!$A${FIRST}:$A${LAST},{k},{S}!${CHECK}${FIRST}:${CHECK}${LAST},"{NOWORK_MARK}*")')
+        # 開始日の誤り：表の日の外、前の単位期間と重なる（開始日は前の単位期間の終了日より後）
+        prev_end = f"{S}!${PCOL(k - 1)}${SR_END}" if k > 1 else '""'
+        d1, dn = f"{S}!$B${FIRST}", f"{S}!$B${LAST}"     # 日ごとの表の最初の日・最後の日
+        bad_start = (f'IF(OR({start}<{d1},{end}>{dn}),"開始日がこの表の日の外です（"&TEXT({d1},"yyyy/m/d")&"から"&TEXT({dn},"yyyy/m/d")&"）",'
+                     f'IF(AND(ISNUMBER({prev_end}),{start}<={prev_end}),"開始日が前の単位期間と重なっています",""))')
+        declared = f"{S}!${pc}${SR_DECL}"
+        approved = f"{W}!${pc}${WR_APPROVE}"
+        alloc = f"{W}!${pc}${WR_ALLOC}"
+        status = (f'IF(NOT(ISNUMBER({start})),"",IF({bad_start}<>"",{bad_start},'
+                  f'IF(NOT(ISNUMBER({declared})),"未申告",'
                   f'IF({c(3)}{t}<>{TOTAL_MIN},"合計が155時間ではありません",'
                   f'IF({c(4)}{t}>0,"入力に誤りがあります",'
                   f'IF({approved}<>"{APPROVE}","承認待ち",'
                   f'IF(NOT(ISNUMBER({alloc})),"割振年月日を入れてください",'
-                  f'IF({declared}>{alloc},"承認後に申告が変更されました（承認し直してください）","承認済み"))))))')
-        vals = [k, f'=TEXT({S}!$B${r1},"yyyy-mm-dd")', f'=TEXT({S}!$B${r2},"yyyy-mm-dd")', f"={total}", f"={errors}",
+                  f'IF({declared}>{alloc},"承認後に申告が変更されました（承認し直してください）","承認済み"))))))))')
+        vals = [k, f'=IF(ISNUMBER({start}),TEXT({start},"yyyy-mm-dd"),"")', f'=IF(ISNUMBER({end}),TEXT({end},"yyyy-mm-dd"),"")', f"={total}", f"={errors}",
                 f'=IF(ISNUMBER({declared}),TEXT({declared},"yyyy-mm-dd"),"")', f'={approved}&""',
                 f'=IF(ISNUMBER({alloc}),TEXT({alloc},"yyyy-mm-dd"),"")', "=" + status,
                 f"={S}!$D$3&\"\"", f"={W}!$D$3&\"\"", f"={W}!$D$4&\"\""]
@@ -327,48 +383,52 @@ def add(wb, MG, OFF_DAYS):
     H = f"'{HYO}'"
     per_col = lambda i: f"{H}!${get_column_letter(PL + i)}$"
 
-    # ===== 単位期間の表（申告・割振りの右側） =====
-    def period_table(ws, heads, values, inputs, input_fill):
-        for i, (head_, width) in enumerate(heads):
-            col = P_COLS[i]
-            ws.column_dimensions[col].width = width
-            c = ws[f"{col}{P_HEAD}"]
+    # ===== 単位期間の表（申告・割振りの右上。固定した行に横に並べる） =====
+    def period_table(ws, rows, values, inputs, input_fill, status_row):
+        """rows：[(行, 見出し)]。values(k) は rows の順の値。inputs は入力する行。状態の行は status_row〜11 を結合して折り返す"""
+        ws.column_dimensions["AJ"].width = 11
+        ws[f"AJ2"] = "単位期間（4週間）"
+        ws[f"AJ2"].font = f_bold
+        for row, head_ in rows:
+            c = ws[f"AJ{row}"]
             c.value, c.font, c.fill, c.border, c.alignment = head_, f_head, fill_head, border, center
-        ws[f"{P_COLS[0]}{P_HEAD - 1}"] = "単位期間（4週間）"
-        ws[f"{P_COLS[0]}{P_HEAD - 1}"].font = f_bold
+        ws.merge_cells(f"AJ{status_row}:AJ11")
         for k in range(1, N_PERIODS + 1):
-            pr = FIRST + k - 1
-            for i, v in enumerate(values(k, pr)):
-                c = ws[f"{P_COLS[i]}{pr}"]
+            col = PCOL(k)
+            ws.column_dimensions[col].width = 10.5
+            for (row, _), v in zip(rows, values(k)):
+                c = ws[f"{col}{row}"]
                 c.value = v
                 c.font, c.border, c.alignment = f_small, border, center
-                c.fill = input_fill if i in inputs else fill_calc
-                if i in inputs:
+                c.fill = input_fill if row in inputs else fill_calc
+                if row in inputs:
                     c.protection = UNLOCK
-            ws[f"{P_COLS[1]}{pr}"].number_format = 'm"/"d'
-            ws[f"{P_COLS[2]}{pr}"].number_format = 'm"/"d'
+                if row in (SR_START, SR_END, SR_DECL, WR_ALLOC) and row != WR_APPROVE:
+                    c.number_format = "yyyy/m/d"
+            ws.merge_cells(f"{col}{status_row}:{col}11")
+            ws[f"{col}{status_row}"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            for r in range(status_row, 12):
+                ws[f"{col}{r}"].border = border
+        ws[f"{PCOL(1)}{SR_NO}"].number_format = "0"
 
     def total_text(k):
         tm = f"{per_col(3)}{k + 1}"
         return f'=INT({tm}/60)&"時間"&MOD({tm},60)&"分"'
 
-    period_table(sin, [("期間", 5.5), ("開始日", 7.5), ("終了日", 7.5), ("合計", 11), ("申告年月日", 11), ("状態", 30)],
-                 lambda k, pr: [k, f"={S}!$B${FIRST + (k - 1) * PERIOD}", f"={S}!$B${FIRST + k * PERIOD - 1}",
-                                total_text(k), None, f"={per_col(8)}{k + 1}"],
-                 inputs={4}, input_fill=fill_staff)
-    for k in range(1, N_PERIODS + 1):
-        sin[f"AN{FIRST + k - 1}"].number_format = "yyyy/m/d"
-    # 申告年月日は日付だけ
+    period_table(sin, [(SR_NO, "期間"), (SR_START, "開始日"), (SR_END, "終了日"), (SR_TOTAL, "合計"), (SR_DECL, "申告年月日"), (SR_STATUS, "状態")],
+                 lambda k: [k, None, f'=IF(ISNUMBER({PCOL(k)}{SR_START}),{PCOL(k)}{SR_START}+{PERIOD - 1},"")',
+                            f'=IF({PCOL(k)}{SR_START}="","",{total_text(k)[1:]})', None, f"={per_col(8)}{k + 1}"],
+                 inputs={SR_START, SR_DECL}, input_fill=fill_staff, status_row=SR_STATUS)
+    # 開始日・申告年月日は日付だけ
     dv = DataValidation(type="date", operator="greaterThan", formula1="43831", allow_blank=True, imeMode="halfAlpha")
-    dv.errorTitle, dv.error = "日付を入れてください", "例：2026/3/31"
+    dv.errorTitle, dv.error = "日付を入れてください", "例：2026/4/1"
     sin.add_data_validation(dv)
-    dv.add(f"AN{FIRST}:AN{FIRST + N_PERIODS - 1}")
-    status_rules = [(f'AND($AO{FIRST}<>"承認済み",$AO{FIRST}<>"未申告",$AO{FIRST}<>"承認待ち")', fill_bad, font_bad)]
-    for rng_, col in ((f"AO{FIRST}:AO{FIRST + N_PERIODS - 1}", "AO"),):
-        for rule, fill, font in status_rules:
-            sin.conditional_formatting.add(rng_, FormulaRule(formula=[rule], fill=fill, font=font))
-    sin.conditional_formatting.add(f"AM{FIRST}:AM{FIRST + N_PERIODS - 1}",
-                                   FormulaRule(formula=[f"{H}!$O2<>{TOTAL_MIN}"], fill=fill_bad, font=font_bad))
+    dv.add(f"{PK1}{SR_START}:{PKN}{SR_START}")
+    dv.add(f"{PK1}{SR_DECL}:{PKN}{SR_DECL}")
+    bad_status = lambda cell: f'AND({cell}<>"",{cell}<>"承認済み",{cell}<>"未申告",{cell}<>"承認待ち")'
+    sin.conditional_formatting.add(f"{PK1}{SR_STATUS}:{PKN}{SR_STATUS}", FormulaRule(formula=[bad_status(f"{PK1}${SR_STATUS}")], fill=fill_bad, font=font_bad))
+    sin.conditional_formatting.add(f"{PK1}{SR_TOTAL}:{PKN}{SR_TOTAL}", FormulaRule(
+        formula=[f'AND({PK1}${SR_START}<>"",INDEX({H}!$O$2:$O${N_PERIODS + 1},{PK1}${SR_NO})<>{TOTAL_MIN})'], fill=fill_bad, font=font_bad))
 
     # ===== フレックス割振り（所属長） =====
     day_frame(wari, "フレックスタイム制　割振り（所属長が確認）",
@@ -390,11 +450,10 @@ def add(wb, MG, OFF_DAYS):
             if fill is fill_boss:
                 wari[f"{col}{r}"].protection = UNLOCK
         wari[f"D{r}"].font, wari[f"D{r}"].alignment = f_bold, left
-    wari["O3"] = "・右の表で、単位期間ごとに内容を確かめ、承認の欄で「承認」を選び、割振年月日を入れます。"
-    wari["O4"] = "・本人が承認の後で書き直すと「承認後に申告が変更されました」と出ます。確かめて、割振年月日を確かめた日に書き直します。"
-    wari["O5"] = "・状態が「承認済み」の単位期間が、管理者に取り込まれます。"
-    for ref in ("O3", "O4", "O5"):
-        wari[ref].font = f_note
+    notes(wari, [
+        "・右上の表で、単位期間ごとに内容を確かめ、承認の欄で「承認」を選び、割振年月日を入れます。状態が「承認済み」の単位期間が、管理者に取り込まれます。",
+        "・本人が承認の後で書き直すと「承認後に申告が変更されました」と出ます。確かめて、割振年月日を確かめた日に書き直します。",
+    ])
     for r in range(FIRST, LAST + 1):
         for c in range(1, 28):
             col = get_column_letter(c)
@@ -411,30 +470,35 @@ def add(wb, MG, OFF_DAYS):
         wari.row_dimensions[r].height = 15
         for col in (OFF, WEEKEND):
             wari[f"{col}{r}"] = f"={S}!{col}{r}"
-    wari.conditional_formatting.add(f"{CHECK}{FIRST}:{CHECK}{LAST}", FormulaRule(formula=[f'${CHECK}{FIRST}<>""'], fill=fill_bad, font=font_bad))
+    wari.conditional_formatting.add(f"{CHECK}{FIRST}:{CHECK}{LAST}", FormulaRule(formula=[f'AND(${CHECK}{FIRST}<>"",LEFT(${CHECK}{FIRST},1)<>"{NOWORK_MARK}")'], fill=fill_bad, font=font_bad))
+    # ※ の注意（承認を止めない）は薄い橙
+    wari.conditional_formatting.add(f"{CHECK}{FIRST}:{CHECK}{LAST}", FormulaRule(formula=[f'LEFT(${CHECK}{FIRST},1)="{NOWORK_MARK}"'],
+                                   fill=PatternFill("solid", fgColor="FCE4D6", bgColor="FCE4D6")))
+    wari.conditional_formatting.add(f"A{FIRST}:{CHECK}{LAST}", FormulaRule(formula=[f'$A{FIRST}=""'], font=Font(color="A6A6A6")))
+    wari.conditional_formatting.add(f"A{FIRST}:{CHECK}{LAST}", FormulaRule(
+        formula=[f'AND($A{FIRST}<>"",$B{FIRST}=INDEX({prow(SR_END)},$A{FIRST}))'],
+        border=Border(bottom=Side(style="thin", color="1E3A5F"))))
     wari.conditional_formatting.add(f"A{FIRST}:{MINS}{LAST}",
                                     FormulaRule(formula=[f"OR(${WEEKEND}{FIRST}=1,${OFF}{FIRST}=1)"], fill=fill_off))
-    period_table(wari, [("期間", 5.5), ("開始日", 7.5), ("終了日", 7.5), ("合計", 11), ("申告年月日", 11), ("承認", 7), ("割振年月日", 11), ("状態", 30)],
-                 lambda k, pr: [k, f"={S}!$B${FIRST + (k - 1) * PERIOD}", f"={S}!$B${FIRST + k * PERIOD - 1}",
-                                total_text(k), f'=IF(ISNUMBER({S}!$AN${pr}),{S}!$AN${pr},"")', None, None, f"={per_col(8)}{k + 1}"],
-                 inputs={5, 6}, input_fill=fill_boss)
-    for k in range(1, N_PERIODS + 1):
-        wari[f"AN{FIRST + k - 1}"].number_format = "yyyy/m/d"
-        wari[f"AP{FIRST + k - 1}"].number_format = "yyyy/m/d"
-    # 割振り側の列：AJ 期間 AK 開始 AL 終了 AM 合計 AN 申告年月日 AO 承認 AP 割振年月日 AQ 状態 … 承認は AO、割振年月日は AP
+    ref = lambda k, row: f"{S}!${PCOL(k)}${row}"
+    period_table(wari, [(SR_NO, "期間"), (SR_START, "開始日"), (SR_END, "終了日"), (SR_TOTAL, "合計"), (SR_DECL, "申告年月日"),
+                        (WR_APPROVE, "承認"), (WR_ALLOC, "割振年月日"), (WR_STATUS, "状態")],
+                 lambda k: [k, f'=IF(ISNUMBER({ref(k, SR_START)}),{ref(k, SR_START)},"")', f'=IF(ISNUMBER({ref(k, SR_END)}),{ref(k, SR_END)},"")',
+                            f'=IF({ref(k, SR_START)}="","",{total_text(k)[1:]})', f'=IF(ISNUMBER({ref(k, SR_DECL)}),{ref(k, SR_DECL)},"")',
+                            None, None, f"={per_col(8)}{k + 1}"],
+                 inputs={WR_APPROVE, WR_ALLOC}, input_fill=fill_boss, status_row=WR_STATUS)
     dv = DataValidation(type="list", allow_blank=True, formula1=f'"{APPROVE}"')
     dv.errorTitle, dv.error = "承認", "「承認」を選んでください（取り消すときは消します）。"
     wari.add_data_validation(dv)
-    dv.add(f"AO{FIRST}:AO{FIRST + N_PERIODS - 1}")
+    dv.add(f"{PK1}{WR_APPROVE}:{PKN}{WR_APPROVE}")
     dv = DataValidation(type="date", operator="greaterThan", formula1="43831", allow_blank=True, imeMode="halfAlpha")
     dv.errorTitle, dv.error = "日付を入れてください", "例：2026/3/31"
     wari.add_data_validation(dv)
-    dv.add(f"AP{FIRST}:AP{FIRST + N_PERIODS - 1}")
-    last_p = FIRST + N_PERIODS - 1
-    wari.conditional_formatting.add(f"AQ{FIRST}:AQ{last_p}", FormulaRule(
-        formula=[f'AND($AQ{FIRST}<>"承認済み",$AQ{FIRST}<>"未申告",$AQ{FIRST}<>"承認待ち")'], fill=fill_bad, font=font_bad))
-    wari.conditional_formatting.add(f"AO{FIRST}:AP{last_p}", FormulaRule(
-        formula=[f'AND($AO{FIRST}="{APPROVE}",OR($AP{FIRST}="",LEFT($AQ{FIRST},3)="承認後",$AQ{FIRST}="合計が155時間ではありません",$AQ{FIRST}="入力に誤りがあります",$AQ{FIRST}="未申告"))'],
+    dv.add(f"{PK1}{WR_ALLOC}:{PKN}{WR_ALLOC}")
+    wari.conditional_formatting.add(f"{PK1}{WR_STATUS}:{PKN}{WR_STATUS}", FormulaRule(formula=[bad_status(f"{PK1}${WR_STATUS}")], fill=fill_bad, font=font_bad))
+    st = f"{PK1}${WR_STATUS}"
+    wari.conditional_formatting.add(f"{PK1}{WR_APPROVE}:{PKN}{WR_ALLOC}", FormulaRule(
+        formula=[f'AND({PK1}${WR_APPROVE}="{APPROVE}",OR({PK1}${WR_ALLOC}="",LEFT({st},3)="承認後",{st}="合計が155時間ではありません",{st}="入力に誤りがあります",{st}="未申告",LEFT({st},3)="開始日"))'],
         fill=fill_bad, font=font_bad))
 
     for ws in (sin, wari):

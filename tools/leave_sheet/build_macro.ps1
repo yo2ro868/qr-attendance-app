@@ -58,20 +58,39 @@ try {
         '   B4 を新しいひな形にして、職員や所属長が開いていない時間に押します。',
         '5.［超過勤務の月を追加］：毎月の終わりごろに、B7 を翌月にして押します。全員の休暇申請シートに超過勤務等命令簿のその月のシート（超勤 R8.12 など）を作り、前月の最終日の退庁時刻（25:00 など）をつなぎます。あるシートは作り直しません。',
         '6. 結果シートで、職員ごとの結果を確かめます。',
+        '7.［申告・割振り簿を見る］：B9 に出勤用ID を入れて押すと、その人の休暇申請シートを読み取り専用で開き、管理者だけが見るフレックスの「申告・割振り簿」（総務課の様式）を表示します。印刷したら保存しないで閉じます。',
         '※ 休暇申請シートでは、年・合計・調整は非表示の「管理」シートに入り、本人・所属長には見えません（見えるのは氏名と、計算した残り日数などだけです）。')
+    # ［申告・割振り簿を見る］で開く人の出勤用ID（B9）
+    $cfg.Range('A9').Value2 = '申告・割振り簿を見る人'; $cfg.Range('A9').Font.Bold = $true
+    $cfg.Range('B9').Interior.Color = 0xCCF2FF; $cfg.Range('B9').Borders.LineStyle = 1; $cfg.Range('B9').NumberFormat = '@'
+    $cfg.Range('B9').HorizontalAlignment = -4131
+    $cfg.Range('C9').Value2 = '出勤用ID（フレックスの申告・割振り簿を、読み取り専用で開いて表示します）'
+    $cfg.Range('C9').Font.Size = 9; $cfg.Range('C9').Font.Color = 0x555555
+    # ボタン：11行目の見出しの下に1行に1つ（入力欄にかからないように）。右の B 列にすることを書く。
+    # 行の高さを先に決めてから置く（後で高さを変えると、ボタンが下の行にはみ出すため）
+    $cfg.Range('A11').Value2 = '操作（ボタン）'; $cfg.Range('A11').Font.Bold = $true
+    $buttons = @(
+        @('休暇申請シートを作成', 'CreateLeaveSheets', '職員名簿の全員について、まだない人の休暇申請シートを作ります（B3〜B6）'),
+        @('休暇申請シートを更新', 'UpdateLeaveSheets', '全員の休暇申請シートに、休暇等シートの B6 の年の 合計・本年使用の調整 などを書き込みます'),
+        @('様式を移行', 'MigrateLeaveSheets', '様式の古い休暇申請シートを、書いた内容を残して B4 のひな形の様式にします'),
+        @('超過勤務の月を追加', 'AddOvertimeMonths', '全員の休暇申請シートに、B7 の月の超過勤務等命令簿のシートを作ります'),
+        @('申告・割振り簿を見る', 'ShowFlexBook', 'B9 の人の休暇申請シートを読み取り専用で開き、フレックスの申告・割振り簿を表示します'))
+    for ($i = 0; $i -lt $buttons.Count; $i++) {
+        $r = 12 + $i
+        $cfg.Rows.Item($r).RowHeight = 30
+        $cell = $cfg.Range("A$r")
+        $btn = $cfg.Shapes.AddFormControl(0, $cell.Left + 2, $cell.Top + 2, $cell.Width - 4, 26)
+        $btn.OLEFormat.Object.Caption = $buttons[$i][0]
+        $btn.OnAction = $buttons[$i][1]
+        $btn.Placement = 2      # セルに合わせて動く
+        $cfg.Range("B$r").Value2 = $buttons[$i][2]
+        $cfg.Range("B$r").Font.Size = 9; $cfg.Range("B$r").VerticalAlignment = -4108
+    }
+    # 使い方（ボタンの下）
     for ($i = 0; $i -lt $notes.Count; $i++) {
-        $c = $cfg.Range("A$(11 + $i)"); $c.Value2 = $notes[$i]
+        $c = $cfg.Range("A$(18 + $i)"); $c.Value2 = $notes[$i]
         if ($i -eq 0) { $c.Font.Bold = $true } else { $c.Font.Size = 9 }
     }
-    # フォーム コントロールのボタン（0 = xlButtonControl）
-    $buttons = @(@('休暇申請シートを作成', 'CreateLeaveSheets', 0), @('休暇申請シートを更新', 'UpdateLeaveSheets', 170), @('様式を移行', 'MigrateLeaveSheets', 340),
-                 @('超過勤務の月を追加', 'AddOvertimeMonths', 510))
-    foreach ($b in $buttons) {
-        $btn = $cfg.Shapes.AddFormControl(0, $cfg.Range('B8').Left + $b[2], $cfg.Range('B8').Top, 160, 26)
-        $btn.OLEFormat.Object.Caption = $b[0]
-        $btn.OnAction = $b[1]
-    }
-    $cfg.Rows.Item(8).RowHeight = 30
     $heads = @('出勤用ID', '氏名', 'ファイル名', '結果')
     for ($i = 0; $i -lt $heads.Count; $i++) { $res.Cells.Item(1, $i + 1).Value2 = $heads[$i] }
     $res.Range('A1:D1').Font.Bold = $true
