@@ -71,6 +71,42 @@ async function invalidQrPage(req, token, user) {
   return layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', user);
 }
 
+// 今の日本時間：日付 yyyy-mm-dd と時刻 HH:MM:SS（出勤記録の形）
+function jstToday() {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString();
+  return { now, date: jst.slice(0, 10), time: jst.slice(11, 19) };
+}
+
+// その職員のその日の最初の出勤記録（設置場所の名前つき）。なければ null
+async function firstAttendanceToday(userId, date) {
+  return queryOne(
+    `SELECT r.attendance_time, l.name AS location_name FROM attendance_records r
+     JOIN qr_locations l ON r.qr_location_id = l.id
+     WHERE r.user_id = $1 AND r.attendance_date = $2
+     ORDER BY r.attendance_time LIMIT 1`,
+    [userId, date]
+  );
+}
+
+// 同じ日の2回目の出勤登録：記録はせず、最初の登録を知らせる。読んだことは操作ログに残す
+async function alreadyRegisteredPage(req, first, loc) {
+  const hm = String(first.attendance_time || '').slice(0, 5);
+  await logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'ATTENDANCE_AGAIN',
+    `読んだ場所：${loc.name}（最初の登録 ${hm} ${first.location_name}）`, req.ip);
+  return layout('出勤登録済み', `
+    <div class="card">
+      <h2>出勤登録済みです</h2>
+      <div class="message message-info">本日はすでに出勤登録が済んでいます。もう一度登録する必要はありません。</div>
+      <div class="confirm-item"><span class="label">出勤時刻</span><span class="value">${escapeHtml(hm)}</span></div>
+      <div class="confirm-item"><span class="label">QR設置場所</span><span class="value">${escapeHtml(first.location_name)}</span></div>
+      <p style="margin-top:24px; text-align:center;">
+        <a href="/logout" class="btn btn-secondary" style="display:inline-block;">ログアウト</a>
+      </p>
+    </div>
+  `, { role: req.session.role });
+}
+
 // ISO の日時を日本時間の「2026/11/18 9:05」に
 function formatJst(iso) {
   const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
@@ -514,6 +550,10 @@ app.get('/confirm', requireLogin, requirePasswordChanged, async (req, res) => {
   const loc = await activeLocation(token);
   if (!loc) return res.send(await invalidQrPage(req, token, { role: req.session.role }));
 
+  // 今日すでに出勤登録していれば、確認画面は出さずに知らせる
+  const first = await firstAttendanceToday(req.session.userId, jstToday().date);
+  if (first) return res.send(await alreadyRegisteredPage(req, first, loc));
+
   res.send(layout('出勤登録確認', `
     <div class="card">
       <h2>出勤登録の確認</h2>
@@ -525,7 +565,8 @@ app.get('/confirm', requireLogin, requirePasswordChanged, async (req, res) => {
         <span class="label">QR設置場所</span>
         <span class="value">${loc.name}</span>
       </div>
-      <form method="POST" action="/api/attendance" style="margin-top:24px;">
+      <form method="POST" action="/api/attendance" style="margin-top:24px;"
+            onsubmit="this.querySelector('button').disabled = true;">
         <input type="hidden" name="qr_token" value="${loc.qr_token}">
         <button type="submit" class="btn btn-success" style="font-size:1.2rem; padding:18px;">
           ✅ 出勤登録する
@@ -570,19 +611,24 @@ app.post('/api/attendance', requireLogin, requirePasswordChanged, async (req, re
   // 確認画面を開いたあとでQRコードが新しくなった場合も、古いQRコードとして案内する
   if (!loc) return res.send(await invalidQrPage(req, qr_token, { role: req.session.role }));
 
-  const now = new Date();
-  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const date = jstNow.toISOString().slice(0, 10);
-  const time = jstNow.toISOString().slice(11, 19);
+  const { now, date, time } = jstToday();
 
+  // 1日1回：今日の記録がまだないときだけ入れる（ボタンの2度押しや、確認画面を2つ開いていた場合も1件になる）
   const result = await query(
     `INSERT INTO attendance_records
      (user_id, attendance_code, qr_location_id, attendance_date, attendance_time, registered_at, device_info, ip_address)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+     SELECT $1::integer, $2::text, $3::integer, $4::text, $5::text, $6::text, $7::text, $8::text
+     WHERE NOT EXISTS (SELECT 1 FROM attendance_records WHERE user_id = $1::integer AND attendance_date = $4::text)
+     RETURNING id`,
     [req.session.userId, req.session.attendanceCode, loc.id,
      date, time, now.toISOString(),
      req.headers['user-agent'], req.ip]
   );
+  if (result.length === 0) {
+    const first = await firstAttendanceToday(req.session.userId, date);
+    if (first) return res.send(await alreadyRegisteredPage(req, first, loc));
+    return res.redirect('/home');
+  }
 
   await logOperation(req.session.userId, req.session.attendanceCode, 'staff', 'ATTENDANCE', `場所:${loc.name}`, req.ip);
   res.redirect(`/attendance-complete?id=${result[0].id}`);
@@ -1148,7 +1194,7 @@ app.get('/admin/logs', requireAdmin, async (req, res) => {
   const roleLabel = { admin: '管理者', staff: '職員' };
   const actionLabel = {
     LOGIN: 'ログイン', LOGIN_FAIL: 'ログイン失敗', LOGOUT: 'ログアウト',
-    ATTENDANCE: '出勤登録', CSV_UPLOAD: 'CSVアップロード',
+    ATTENDANCE: '出勤登録', ATTENDANCE_AGAIN: '同じ日の2回目の読み取り（記録せず）', CSV_UPLOAD: 'CSVアップロード',
     USER_TOGGLE: 'ユーザー有効/無効変更', USER_DELETE: 'ユーザー削除',
     USER_UNLOCK: 'ロック解除', QR_ROTATE: 'QRコードを新しくした', OLD_QR: '使えなくなったQRコードを読んだ',
     PASSWORD_CHANGE: 'パスワード変更', ROLE_CHANGE: '権限変更', EXCEL_EXPORT: 'Excel出力',
