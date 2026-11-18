@@ -33,6 +33,55 @@ async function queryOne(sql, params = []) {
   return rows[0] || null;
 }
 
+// QRコードに入れる文字：推測できないランダムな16文字（URL に使える文字だけ）
+function newQrToken() {
+  return crypto.randomBytes(12).toString('base64url');
+}
+
+// 前の形（loc-001 など、推測しやすい文字）のままのQRコードか
+function isGuessableToken(token) {
+  return /^loc-\d+$/.test(token || '');
+}
+
+// 使えるQRコードの設置場所。なければ null
+async function activeLocation(token) {
+  if (!token) return null;
+  return queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [token]);
+}
+
+// 新しくして使えなくなったQRコードなら、その設置場所の名前と新しくした日時。そうでなければ null
+async function retiredLocation(token) {
+  if (!token) return null;
+  return queryOne(
+    `SELECT l.name, h.retired_at FROM qr_token_history h JOIN qr_locations l ON h.qr_location_id = l.id WHERE h.token = $1`,
+    [token]
+  );
+}
+
+// 使えないQRコードを読んだときの画面（古いQRなら記録も残す）
+async function invalidQrPage(req, token, user) {
+  const old = await retiredLocation(token);
+  if (old) {
+    await logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'OLD_QR',
+      `設置場所：${old.name}（${formatJst(old.retired_at)} に新しくしたQRコード）`, req.ip);
+    return layout('使えないQRコード', `<div class="card"><div class="message message-error">
+      このQRコードは使えなくなりました（${escapeHtml(old.name)}：${formatJst(old.retired_at)} に新しくなりました）。<br>
+      設置場所に貼ってある新しいQRコードを読み取ってください。</div></div>`, user);
+  }
+  return layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', user);
+}
+
+// ISO の日時を日本時間の「2026/11/18 9:05」に
+function formatJst(iso) {
+  const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+  if (isNaN(d)) return iso || '';
+  return `${d.getUTCFullYear()}/${d.getUTCMonth() + 1}/${d.getUTCDate()} ${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 // ===== DB初期化 =====
 async function initDB() {
   await query(`
@@ -90,26 +139,40 @@ async function initDB() {
     )
   `);
 
-  // 初期データ投入
+  // QRコードの文字（qr_token）は設置場所の目印（loc_key）と分け、管理者が［QRコードを新しくする］で変えられるようにする。
+  // 新しくした古い文字は qr_token_history に残し、読まれたら「使えなくなったQRコード」と案内して記録する
+  await query(`ALTER TABLE qr_locations ADD COLUMN IF NOT EXISTS loc_key TEXT`);
+  await query(`ALTER TABLE qr_locations ADD COLUMN IF NOT EXISTS token_updated_at TEXT`);
+  await query(`UPDATE qr_locations SET loc_key = qr_token WHERE loc_key IS NULL`);   // 前の形（qr_token が loc-001 など）の行
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS qr_locations_loc_key ON qr_locations (loc_key)`);
+  await query(`
+    CREATE TABLE IF NOT EXISTS qr_token_history (
+      token TEXT PRIMARY KEY,
+      qr_location_id INTEGER NOT NULL,
+      retired_at TEXT NOT NULL
+    )
+  `);
+
+  // 設置場所（目印と名称）。QRコードの文字はここには書かない（はじめて作るときだけ、推測できないランダムな文字にする）
   const locations = [
-    { name: 'K',               token: 'loc-001' },
-    { name: '1',               token: 'loc-002' },
-    { name: '2',               token: 'loc-003' },
-    { name: '3',               token: 'loc-004' },
-    { name: '4',               token: 'loc-005' },
-    { name: '5',               token: 'loc-006' },
-    { name: 'H',               token: 'loc-007' },
-    { name: 'S-J',             token: 'loc-008' },
-    { name: 'S-K',             token: 'loc-009' },
-    { name: 'S-T',             token: 'loc-010' },
-    { name: 'J',               token: 'loc-011' },
+    { key: 'loc-001', name: 'K' },
+    { key: 'loc-002', name: '1' },
+    { key: 'loc-003', name: '2' },
+    { key: 'loc-004', name: '3' },
+    { key: 'loc-005', name: '4' },
+    { key: 'loc-006', name: '5' },
+    { key: 'loc-007', name: 'H' },
+    { key: 'loc-008', name: 'S-J' },
+    { key: 'loc-009', name: 'S-K' },
+    { key: 'loc-010', name: 'S-T' },
+    { key: 'loc-011', name: 'J' },
   ];
-  // 既存の設置場所も、ここに書いた名称で更新する
+  // 既存の設置場所は名称だけを更新し、QRコードの文字は変えない
   for (const l of locations) {
     await query(
-      `INSERT INTO qr_locations (name, qr_token) VALUES ($1, $2)
-       ON CONFLICT (qr_token) DO UPDATE SET name = EXCLUDED.name`,
-      [l.name, l.token]
+      `INSERT INTO qr_locations (name, loc_key, qr_token, token_updated_at) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (loc_key) DO UPDATE SET name = EXCLUDED.name`,
+      [l.name, l.key, newQrToken(), new Date().toISOString()]
     );
   }
 
@@ -227,10 +290,11 @@ async function resetFailedAttempts(userId) {
 
 // ===== QRコード読み取り =====
 app.get('/scan/:token', async (req, res) => {
-  const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [req.params.token]);
-  if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', false));
-  if (req.session.userId) return res.redirect(`/confirm?token=${req.params.token}`);
-  res.redirect(`/?token=${req.params.token}`);
+  const loc = await activeLocation(req.params.token);
+  if (!loc) return res.send(await invalidQrPage(req, req.params.token, false));
+  const t = encodeURIComponent(loc.qr_token);
+  if (req.session.userId) return res.redirect(`/confirm?token=${t}`);
+  res.redirect(`/?token=${t}`);
 });
 
 // ===== ログイン画面 =====
@@ -275,7 +339,7 @@ app.get('/', async (req, res) => {
     ${errorMsg}
     ${locationInfo}
     <form method="POST" action="/login">
-      <input type="hidden" name="token" value="${token}">
+      <input type="hidden" name="token" value="${escapeHtml(token)}">
       <div class="form-group">
         <label>出勤用ID</label>
         <input type="text" name="login_id" placeholder="例：1234" required autofocus>
@@ -303,7 +367,7 @@ app.post('/login', async (req, res) => {
 
   if (!user) {
     await logOperation(null, login_id, null, 'LOGIN_FAIL', 'IDが存在しない', req.ip);
-    const tokenParam = token ? `&token=${token}` : '';
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
     return res.redirect(`/?error=1${tokenParam}`);
   }
 
@@ -311,7 +375,7 @@ app.post('/login', async (req, res) => {
   const lockStatus = await checkAndLock(user);
   if (lockStatus.locked) {
     await logOperation(user.id, user.attendance_code, user.role, 'LOGIN_FAIL', 'アカウントロック中', req.ip);
-    const tokenParam = token ? `&token=${token}` : '';
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
     return res.redirect(`/?error=locked&min=${lockStatus.remaining}${tokenParam}`);
   }
 
@@ -319,7 +383,7 @@ app.post('/login', async (req, res) => {
   if (!bcrypt.compareSync(password, user.password_hash)) {
     const result = await recordFailedAttempt(user);
     await logOperation(user.id, user.attendance_code, user.role, 'LOGIN_FAIL', `パスワード誤り(${user.failed_attempts + 1}回目)`, req.ip);
-    const tokenParam = token ? `&token=${token}` : '';
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
     if (result.locked) {
       return res.redirect(`/?error=locked&min=${result.remaining}${tokenParam}`);
     }
@@ -340,7 +404,7 @@ app.post('/login', async (req, res) => {
     return res.redirect('/change-password');
   }
 
-  if (token) return res.redirect(`/confirm?token=${token}`);
+  if (token) return res.redirect(`/confirm?token=${encodeURIComponent(token)}`);
   res.redirect(user.role === 'admin' ? '/admin' : '/home');
 });
 
@@ -409,7 +473,7 @@ app.post('/change-password', requireLogin, async (req, res) => {
   const isForced = user.must_change_password === 1;
   if (isForced) {
     const token = req.session.qrToken;
-    if (token) return res.redirect(`/confirm?token=${token}`);
+    if (token) return res.redirect(`/confirm?token=${encodeURIComponent(token)}`);
     return res.redirect(req.session.role === 'admin' ? '/admin' : '/home');
   }
 
@@ -447,8 +511,8 @@ app.get('/qr-reader', (req, res) => {
 app.get('/confirm', requireLogin, requirePasswordChanged, async (req, res) => {
   if (req.session.role === 'admin') return res.redirect('/admin');
   const token = req.query.token || req.session.qrToken;
-  const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [token]);
-  if (!loc) return res.send(layout('エラー', '<div class="card"><div class="message message-error">無効なQRコードです。</div></div>', { role: req.session.role }));
+  const loc = await activeLocation(token);
+  if (!loc) return res.send(await invalidQrPage(req, token, { role: req.session.role }));
 
   res.send(layout('出勤登録確認', `
     <div class="card">
@@ -502,8 +566,9 @@ app.get('/home', requireLogin, requirePasswordChanged, (req, res) => {
 // ===== 出勤登録API =====
 app.post('/api/attendance', requireLogin, requirePasswordChanged, async (req, res) => {
   const { qr_token } = req.body;
-  const loc = await queryOne('SELECT * FROM qr_locations WHERE qr_token = $1 AND is_active = 1', [qr_token]);
-  if (!loc) return res.redirect('/home');
+  const loc = await activeLocation(qr_token);
+  // 確認画面を開いたあとでQRコードが新しくなった場合も、古いQRコードとして案内する
+  if (!loc) return res.send(await invalidQrPage(req, qr_token, { role: req.session.role }));
 
   const now = new Date();
   const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
@@ -680,20 +745,26 @@ app.get('/admin/attendance/:id', requireAdmin, async (req, res) => {
 
 // ===== QRコード管理 =====
 app.get('/admin/qr', requireAdmin, async (req, res) => {
-  const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1');
+  const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1 ORDER BY loc_key, id');
   const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
+  const guessable = locs.filter(l => isGuessableToken(l.qr_token)).length;
+  const result = req.query.result ? `<div class="message message-success">✅ ${escapeHtml(req.query.result)}</div>` : '';
   const qrItems = await Promise.all(locs.map(async l => {
     const url = `${baseUrl}/scan/${l.qr_token}`;
     const qrDataUrl = await QRCode.toDataURL(url, { width: 200 });
     const mailBody = encodeURIComponent(`出勤登録用QRコードをお送りします。\n\n設置場所：${l.name}\n\nQRコードURL：${url}\n\nスマートフォンのカメラでQRコードを読み取るか、上記URLにアクセスして出勤登録を行ってください。`);
     const mailSubject = encodeURIComponent(`【出勤管理】${l.name} QRコードのご案内`);
+    const updated = isGuessableToken(l.qr_token)
+      ? '<span style="color:#b91c1c; font-weight:bold;">前の形のまま（推測しやすい）</span>'
+      : `最終更新：${l.token_updated_at ? formatJst(l.token_updated_at) : '-'}`;
     return `
       <div class="qr-item">
-        <p style="font-weight:bold; font-size:1rem; color:#333; margin-bottom:8px;">${l.name}</p>
-        <img src="${qrDataUrl}" alt="${l.name}" style="width:180px; display:block; margin:0 auto;">
+        <p style="font-weight:bold; font-size:1rem; color:#333; margin-bottom:8px;">${escapeHtml(l.name)}</p>
+        <img src="${qrDataUrl}" alt="${escapeHtml(l.name)}" style="width:180px; display:block; margin:0 auto;">
         <small style="color:#888; font-size:0.7rem; word-break:break-all; display:block; margin:8px 0;">${url}</small>
-        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
-          <a href="/admin/qr/print/${l.qr_token}" target="_blank"
+        <small style="display:block; font-size:0.75rem; margin-bottom:6px;">${updated}</small>
+        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px; flex-wrap:wrap;">
+          <a href="/admin/qr/print/${encodeURIComponent(l.qr_token)}" target="_blank"
              style="background:#4f46e5; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; text-decoration:none;">
             🖨️ 印刷
           </a>
@@ -701,6 +772,12 @@ app.get('/admin/qr', requireAdmin, async (req, res) => {
              style="background:#22c55e; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; text-decoration:none;">
             📧 メール
           </a>
+          <form method="POST" action="/admin/qr/rotate/${l.id}" style="margin:0;"
+                onsubmit="return confirm('${escapeHtml(l.name)} のQRコードを新しくします。今貼ってあるQRコードはすぐに使えなくなります。よろしいですか？');">
+            <button type="submit" style="background:#f59e0b; color:white; padding:6px 12px; border-radius:8px; font-size:0.8rem; border:none; cursor:pointer;">
+              🔄 新しくする
+            </button>
+          </form>
         </div>
       </div>`;
   }));
@@ -709,23 +786,59 @@ app.get('/admin/qr', requireAdmin, async (req, res) => {
       <p style="margin-bottom:16px;">
         <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
       </p>
-      <h2>QRコード一覧（全11か所）</h2>
+      <h2>QRコード一覧（全${locs.length}か所）</h2>
+      ${result}
+      ${guessable ? `<div class="message message-error" style="margin-bottom:16px; font-size:0.9rem;">
+        ⚠️ ${guessable}か所のQRコードが前の形（loc-001 などの推測しやすい文字）のままです。［全部のQRコードを新しくする］を押し、印刷して貼り替えてください。</div>` : ''}
       <div class="message message-warning" style="margin-bottom:16px; font-size:0.85rem;">
-        ⚠️ 各QRコードの「印刷」ボタンで個別印刷、「メール」ボタンでメール送付できます。
+        ⚠️ 不正を防ぐため、QRコードは定期的に（例：月に1回）新しくして貼り替えてください。新しくすると、それまでのQRコードはすぐに使えなくなります。
+        貼り替えの直前に押し、印刷 → 貼り替えまでを続けて行ってください。古いQRコードを読んだ人には「使えなくなりました」と表示し、操作ログに記録します。<br>
+        「メール」はQRコードの文字（URL）をそのまま送るので、送った相手はどこからでも出勤登録できてしまいます。使うときは送り先に注意してください。
       </div>
-      <p style="margin-bottom:16px;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
         <a href="/admin/qr/print-all" target="_blank" class="btn btn-primary" style="display:inline-block; width:auto;">
           🖨️ 全ロケーション一括印刷
         </a>
-      </p>
+        <form method="POST" action="/admin/qr/rotate-all" style="margin:0;"
+              onsubmit="return confirm('全部（${locs.length}か所）のQRコードを新しくします。今貼ってあるQRコードはすぐに使えなくなります。よろしいですか？');">
+          <button type="submit" class="btn" style="width:auto; background:#f59e0b; color:white;">🔄 全部のQRコードを新しくする</button>
+        </form>
+      </div>
       <div class="qr-grid">${qrItems.join('')}</div>
     </div>
   `, { role: 'admin' }));
 });
 
+// QRコードを新しくする：設置場所ごとに新しいランダムな文字にし、古い文字は履歴に残す（読まれたら「使えなくなった」と案内する）
+async function rotateQrToken(locId) {
+  const loc = await queryOne('SELECT * FROM qr_locations WHERE id = $1 AND is_active = 1', [locId]);
+  if (!loc) return null;
+  const now = new Date().toISOString();
+  await query(
+    `INSERT INTO qr_token_history (token, qr_location_id, retired_at) VALUES ($1, $2, $3) ON CONFLICT (token) DO NOTHING`,
+    [loc.qr_token, loc.id, now]
+  );
+  await query('UPDATE qr_locations SET qr_token = $1, token_updated_at = $2 WHERE id = $3', [newQrToken(), now, loc.id]);
+  return loc;
+}
+
+app.post('/admin/qr/rotate/:id', requireAdmin, async (req, res) => {
+  const loc = await rotateQrToken(Number(req.params.id));
+  if (!loc) return res.redirect('/admin/qr');
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'QR_ROTATE', `設置場所：${loc.name}`, req.ip);
+  res.redirect('/admin/qr?result=' + encodeURIComponent(`${loc.name} のQRコードを新しくしました。印刷して貼り替えてください。`));
+});
+
+app.post('/admin/qr/rotate-all', requireAdmin, async (req, res) => {
+  const locs = await query('SELECT id FROM qr_locations WHERE is_active = 1');
+  for (const l of locs) await rotateQrToken(l.id);
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'QR_ROTATE', `全${locs.length}か所`, req.ip);
+  res.redirect('/admin/qr?result=' + encodeURIComponent(`全${locs.length}か所のQRコードを新しくしました。［全ロケーション一括印刷］で印刷して貼り替えてください。`));
+});
+
 // ===== QRコード全体印刷 =====
 app.get('/admin/qr/print-all', requireAdmin, async (req, res) => {
-  const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1');
+  const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1 ORDER BY loc_key, id');
   const baseUrl = `https://qr-attendance-app-60gi.onrender.com`;
   const pages = await Promise.all(locs.map(async l => {
     const url = `${baseUrl}/scan/${l.qr_token}`;
@@ -1037,7 +1150,7 @@ app.get('/admin/logs', requireAdmin, async (req, res) => {
     LOGIN: 'ログイン', LOGIN_FAIL: 'ログイン失敗', LOGOUT: 'ログアウト',
     ATTENDANCE: '出勤登録', CSV_UPLOAD: 'CSVアップロード',
     USER_TOGGLE: 'ユーザー有効/無効変更', USER_DELETE: 'ユーザー削除',
-    USER_UNLOCK: 'ロック解除',
+    USER_UNLOCK: 'ロック解除', QR_ROTATE: 'QRコードを新しくした', OLD_QR: '使えなくなったQRコードを読んだ',
     PASSWORD_CHANGE: 'パスワード変更', ROLE_CHANGE: '権限変更', EXCEL_EXPORT: 'Excel出力',
   };
   const rows = logs.map(l => `
