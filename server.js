@@ -89,6 +89,46 @@ async function firstAttendanceToday(userId, date) {
   );
 }
 
+// その職員の出勤登録してよい設置場所を、ids で置き換える（空なら、どこでも登録できる状態に戻る）
+async function setUserLocations(userId, ids) {
+  await query('DELETE FROM user_locations WHERE user_id = $1', [userId]);
+  for (const id of ids) {
+    await query('INSERT INTO user_locations (user_id, qr_location_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [userId, id]);
+  }
+}
+
+// その職員の出勤登録してよい設置場所（名前の順）。決めていなければ空の配列（＝どこでも登録できる）
+async function allowedLocations(userId) {
+  return query(
+    `SELECT l.id, l.name FROM user_locations ul JOIN qr_locations l ON ul.qr_location_id = l.id
+     WHERE ul.user_id = $1 ORDER BY l.loc_key`,
+    [userId]
+  );
+}
+
+// 決められた設置場所以外のQRコードを読んだときの画面：記録はせず、読んだことは操作ログに残す
+async function wrongPlacePage(req, loc, allowed) {
+  const names = allowed.map(a => a.name).join('・');
+  await logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'WRONG_PLACE',
+    `読んだ場所：${loc.name}（登録できる場所：${names}）`, req.ip);
+  return layout('この場所では登録できません', `
+    <div class="card">
+      <h2>この場所では出勤登録できません</h2>
+      <div class="message message-error">
+        出勤登録は、決められた設置場所（${escapeHtml(names)}）のQRコードでだけできます。<br>
+        設置場所のQRコードを読み取ってください。
+      </div>
+      <div class="confirm-item"><span class="label">読み取った場所</span><span class="value">${escapeHtml(loc.name)}</span></div>
+      <p style="margin-top:16px; font-size:0.9rem; color:#555;">
+        出張などで決められた場所で登録できない日は、その日のうちに管理者に御連絡ください。
+      </p>
+      <p style="margin-top:24px; text-align:center;">
+        <a href="/logout" class="btn btn-secondary" style="display:inline-block;">ログアウト</a>
+      </p>
+    </div>
+  `, { role: req.session.role });
+}
+
 // 同じ日の2回目の出勤登録：記録はせず、最初の登録を知らせる。読んだことは操作ログに残す
 async function alreadyRegisteredPage(req, first, loc) {
   const hm = String(first.attendance_time || '').slice(0, 5);
@@ -186,6 +226,15 @@ async function initDB() {
       token TEXT PRIMARY KEY,
       qr_location_id INTEGER NOT NULL,
       retired_at TEXT NOT NULL
+    )
+  `);
+
+  // 職員ごとの出勤登録してよい設置場所。行がない職員は、今までどおりどの設置場所でも登録できる
+  await query(`
+    CREATE TABLE IF NOT EXISTS user_locations (
+      user_id INTEGER NOT NULL,
+      qr_location_id INTEGER NOT NULL,
+      PRIMARY KEY (user_id, qr_location_id)
     )
   `);
 
@@ -554,6 +603,10 @@ app.get('/confirm', requireLogin, requirePasswordChanged, async (req, res) => {
   const first = await firstAttendanceToday(req.session.userId, jstToday().date);
   if (first) return res.send(await alreadyRegisteredPage(req, first, loc));
 
+  // 設置場所が決められている職員は、その場所のQRコードでだけ登録できる
+  const allowed = await allowedLocations(req.session.userId);
+  if (allowed.length > 0 && !allowed.some(a => a.id === loc.id)) return res.send(await wrongPlacePage(req, loc, allowed));
+
   res.send(layout('出勤登録確認', `
     <div class="card">
       <h2>出勤登録の確認</h2>
@@ -610,6 +663,9 @@ app.post('/api/attendance', requireLogin, requirePasswordChanged, async (req, re
   const loc = await activeLocation(qr_token);
   // 確認画面を開いたあとでQRコードが新しくなった場合も、古いQRコードとして案内する
   if (!loc) return res.send(await invalidQrPage(req, qr_token, { role: req.session.role }));
+
+  const allowed = await allowedLocations(req.session.userId);
+  if (allowed.length > 0 && !allowed.some(a => a.id === loc.id)) return res.send(await wrongPlacePage(req, loc, allowed));
 
   const { now, date, time } = jstToday();
 
@@ -992,6 +1048,11 @@ app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
 app.get('/admin/users', requireAdmin, async (req, res) => {
   const result = req.query.result ? decodeURIComponent(req.query.result) : '';
   const users = await query(`SELECT id, attendance_code, role, is_active, failed_attempts, locked_until, must_change_password, created_at FROM users ORDER BY is_active DESC, attendance_code`);
+  // 職員ごとの設置場所（名前を「・」でつないだもの）
+  const placeRows = await query(
+    `SELECT ul.user_id, l.name FROM user_locations ul JOIN qr_locations l ON ul.qr_location_id = l.id ORDER BY l.loc_key`);
+  const places = {};
+  for (const p of placeRows) (places[p.user_id] = places[p.user_id] || []).push(p.name);
   const now = new Date();
   const rows = users.map(u => {
     const isLocked = u.locked_until && new Date(u.locked_until) > now;
@@ -1004,6 +1065,7 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
         ${isLocked ? '<span class="badge badge-caution" style="margin-left:4px;">🔒 ロック中</span>' : ''}
         ${u.must_change_password ? '<span class="badge" style="background:#fef3c7;color:#92400e;margin-left:4px;">PW要変更</span>' : ''}
       </td>
+      <td style="padding:14px 12px;">${places[u.id] ? escapeHtml(places[u.id].join('・')) : '<span style="color:#888;">どこでも</span>'}</td>
       <td style="padding:14px 12px;">${u.failed_attempts || 0}回</td>
       <td style="padding:14px 12px; white-space:nowrap;">
         <a href="/admin/users/${u.id}/edit" style="color:#4f46e5; font-size:0.85rem; margin-right:10px;">✏️ 編集</a>
@@ -1030,9 +1092,11 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
       <h2>CSVで一括登録</h2>
       ${result ? `<div class="message message-success">✅ ${result}</div>` : ''}
       <div class="message message-info" style="font-size:0.85rem;">
-        CSVファイルの形式：<strong>出勤用ID,パスワード,権限</strong><br>
+        CSVファイルの形式：<strong>出勤用ID,パスワード,権限,設置場所</strong>（設置場所は省略できます）<br>
         権限は <code>staff</code>（職員）または <code>admin</code>（管理者）<br>
-        ※ 初回登録時は必ずパスワード変更を促す設定になります
+        設置場所は、出勤登録してよい場所の名前（QRコード管理の名称。例 <code>K</code>）。2か所以上は <code>K;1</code> のように「;」で区切ります。空欄の人はどこでも登録できます。<br>
+        ※ 初回登録時は必ずパスワード変更を促す設定になります<br>
+        ※ 登録済みの出勤用IDの行は、設置場所が書いてあればその設置場所だけを置き換えます（パスワード・権限は変えません）
       </div>
       <form id="uploadForm" method="POST" action="/admin/users/upload" enctype="multipart/form-data" style="margin-bottom:24px;">
         <div class="form-group">
@@ -1047,9 +1111,9 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
       <div class="table-wrapper">
         <table>
           <thead>
-            <tr><th>出勤用ID</th><th>権限</th><th>状態</th><th>失敗回数</th><th>操作</th></tr>
+            <tr><th>出勤用ID</th><th>権限</th><th>状態</th><th>設置場所</th><th>失敗回数</th><th>操作</th></tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="5" style="text-align:center">データがありません</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="6" style="text-align:center">データがありません</td></tr>'}</tbody>
         </table>
       </div>
     </div>
@@ -1066,16 +1130,20 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
     let csvContent = '';
     for (const part of parts) {
       if (part.includes('filename=') && part.includes('.csv')) {
-        const lines = part.split('\r\n');
-        const dataStart = lines.findIndex(l => l === '') + 1;
-        csvContent = lines.slice(dataStart).join('\n').trim();
+        // ファイルの中身は、部分の見出し（Content-Disposition など）の後の空行から
+        const headEnd = part.indexOf('\r\n\r\n');
+        csvContent = (headEnd >= 0 ? part.slice(headEnd + 4) : '').replace(/\r\n/g, '\n').replace(/^﻿|^\xEF\xBB\xBF/, '').trim();
         break;
       }
     }
     if (!csvContent) return res.redirect('/admin/users?result=' + encodeURIComponent('CSVファイルが読み込めませんでした'));
 
     const lines = csvContent.split('\n').filter(l => l.trim());
-    let success = 0, skipped = 0, errors = 0;
+    // 設置場所の名前 → id（名前は QRコード管理の名称。前後の空白は無視）
+    const locByName = {};
+    for (const l of await query('SELECT id, name FROM qr_locations WHERE is_active = 1')) locByName[l.name.trim()] = l.id;
+    let success = 0, skipped = 0, placed = 0, errors = 0;
+    const badPlaces = new Set();
     for (const line of lines) {
       const cols = line.trim().split(',');
       if (cols.length < 2) { errors++; continue; }
@@ -1083,20 +1151,31 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
       const pass = cols[1].trim();
       const role = (cols[2] || 'staff').trim();
       if (!code || !pass || !['staff', 'admin'].includes(role)) { errors++; continue; }
+      // 4列目：設置場所（「;」区切り）。書いてない行は設置場所を変えない
+      const placeNames = (cols[3] || '').split(/[;；]/).map(s => s.trim()).filter(Boolean);
+      const unknown = placeNames.filter(n => !(n in locByName));
+      if (unknown.length) { unknown.forEach(n => badPlaces.add(n)); errors++; continue; }
+      const placeIds = [...new Set(placeNames.map(n => locByName[n]))];
       const exists = await queryOne('SELECT id FROM users WHERE attendance_code = $1', [code]);
-      if (exists) { skipped++; continue; }
+      if (exists) {
+        if (placeIds.length) { await setUserLocations(exists.id, placeIds); placed++; }
+        else skipped++;
+        continue;
+      }
       try {
         const hash = bcrypt.hashSync(pass, 10);
-        await query(
-          `INSERT INTO users (attendance_code, login_id, password_hash, role, must_change_password) VALUES ($1, $2, $3, $4, 1)`,
+        const created = await query(
+          `INSERT INTO users (attendance_code, login_id, password_hash, role, must_change_password) VALUES ($1, $2, $3, $4, 1) RETURNING id`,
           [code, code, hash, role]
         );
+        if (placeIds.length) await setUserLocations(created[0].id, placeIds);
         success++;
       } catch (e) { errors++; }
     }
-    await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'CSV_UPLOAD',
-      `成功:${success} スキップ:${skipped} エラー:${errors}`, req.ip);
-    res.redirect(`/admin/users?result=${encodeURIComponent(`登録成功:${success}名 / スキップ:${skipped}名 / エラー:${errors}件`)}`);
+    const summary = `登録成功:${success}名 / 設置場所を置き換え:${placed}名 / スキップ:${skipped}名 / エラー:${errors}件`
+      + (badPlaces.size ? `（見つからない設置場所：${[...badPlaces].join('・')}）` : '');
+    await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'CSV_UPLOAD', summary, req.ip);
+    res.redirect(`/admin/users?result=${encodeURIComponent(summary)}`);
   });
 });
 
@@ -1105,6 +1184,12 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
   const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.params.id]);
   if (!user) return res.redirect('/admin/users');
   const msg = req.query.result ? `<div class="message message-success">✅ ${decodeURIComponent(req.query.result)}</div>` : '';
+  const allLocs = await query('SELECT id, name FROM qr_locations WHERE is_active = 1 ORDER BY loc_key');
+  const mine = new Set((await allowedLocations(user.id)).map(l => l.id));
+  const placeChecks = allLocs.map(l => `
+          <label style="display:inline-flex; align-items:center; gap:4px; margin:0 14px 8px 0; font-weight:normal;">
+            <input type="checkbox" name="loc" value="${l.id}" ${mine.has(l.id) ? 'checked' : ''} style="width:auto;"> ${escapeHtml(l.name)}
+          </label>`).join('');
 
   res.send(layout('ユーザー編集', `
     <div class="card">
@@ -1131,6 +1216,12 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
             </select>
           </div>
           <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">👤 権限変更</button>
+        </form>
+        <h3 style="font-size:1rem; color:#4f46e5; margin:24px 0 12px;">出勤登録できる設置場所</h3>
+        <div class="message message-info" style="font-size:0.85rem;">チェックした設置場所のQRコードでだけ出勤登録できます。1つもチェックしなければ、どこでも登録できます。</div>
+        <form method="POST" action="/admin/users/${user.id}/locations">
+          <div class="form-group">${placeChecks}</div>
+          <button type="submit" class="btn btn-primary" style="width:auto; padding:10px 24px;">📍 設置場所を保存</button>
         </form>
       </div>
     </div>
@@ -1160,6 +1251,20 @@ app.post('/admin/users/:id/role', requireAdmin, async (req, res) => {
   res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('権限を変更しました')}`);
 });
 
+// 出勤登録できる設置場所（チェックなし＝どこでも）
+app.post('/admin/users/:id/locations', requireAdmin, async (req, res) => {
+  const user = await queryOne('SELECT id, attendance_code FROM users WHERE id = $1', [req.params.id]);
+  if (!user) return res.redirect('/admin/users');
+  const picked = [].concat(req.body.loc || []).map(v => parseInt(v, 10)).filter(Number.isInteger);
+  const valid = (await query('SELECT id, name FROM qr_locations WHERE is_active = 1 ORDER BY loc_key'))
+    .filter(l => picked.includes(l.id));
+  await setUserLocations(user.id, valid.map(l => l.id));
+  const names = valid.length ? valid.map(l => l.name).join('・') : 'どこでも';
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_LOCATIONS',
+    `出勤用ID:${user.attendance_code} 設置場所:${names}`, req.ip);
+  res.redirect(`/admin/users/${user.id}/edit?result=${encodeURIComponent(`出勤登録できる設置場所を「${names}」にしました`)}`);
+});
+
 // 有効/無効切り替え
 app.get('/admin/users/:id/toggle', requireAdmin, async (req, res) => {
   const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.params.id]);
@@ -1182,6 +1287,7 @@ app.get('/admin/users/:id/unlock', requireAdmin, async (req, res) => {
 app.get('/admin/users/:id/delete', requireAdmin, async (req, res) => {
   const user = await queryOne('SELECT * FROM users WHERE id = $1', [req.params.id]);
   if (!user) return res.redirect('/admin/users');
+  await query('DELETE FROM user_locations WHERE user_id = $1', [req.params.id]);
   await query('DELETE FROM users WHERE id = $1', [req.params.id]);
   await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'USER_DELETE',
     `出勤用ID:${user.attendance_code}を削除`, req.ip);
@@ -1194,7 +1300,8 @@ app.get('/admin/logs', requireAdmin, async (req, res) => {
   const roleLabel = { admin: '管理者', staff: '職員' };
   const actionLabel = {
     LOGIN: 'ログイン', LOGIN_FAIL: 'ログイン失敗', LOGOUT: 'ログアウト',
-    ATTENDANCE: '出勤登録', ATTENDANCE_AGAIN: '同じ日の2回目の読み取り（記録せず）', CSV_UPLOAD: 'CSVアップロード',
+    ATTENDANCE: '出勤登録', ATTENDANCE_AGAIN: '同じ日の2回目の読み取り（記録せず）',
+    WRONG_PLACE: '決められた場所以外での読み取り（記録せず）', USER_LOCATIONS: '設置場所の変更', CSV_UPLOAD: 'CSVアップロード',
     USER_TOGGLE: 'ユーザー有効/無効変更', USER_DELETE: 'ユーザー削除',
     USER_UNLOCK: 'ロック解除', QR_ROTATE: 'QRコードを新しくした', OLD_QR: '使えなくなったQRコードを読んだ',
     PASSWORD_CHANGE: 'パスワード変更', ROLE_CHANGE: '権限変更', EXCEL_EXPORT: 'Excel出力',
