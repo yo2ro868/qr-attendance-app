@@ -119,9 +119,6 @@ async function wrongPlacePage(req, loc, allowed) {
         設置場所のQRコードを読み取ってください。
       </div>
       <div class="confirm-item"><span class="label">読み取った場所</span><span class="value">${escapeHtml(loc.name)}</span></div>
-      <p style="margin-top:16px; font-size:0.9rem; color:#555;">
-        出張などで決められた場所で登録できない日は、その日のうちに管理者に御連絡ください。
-      </p>
       <p style="margin-top:24px; text-align:center;">
         <a href="/logout" class="btn btn-secondary" style="display:inline-block;">ログアウト</a>
       </p>
