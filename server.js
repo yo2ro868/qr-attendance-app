@@ -334,6 +334,37 @@ function layout(title, body, user) {
 </html>`;
 }
 
+// ===== パスワードの決まり =====
+// 英字・数字・記号をすべて含む10文字以上。使える文字は半角の英字・数字・記号（空白・全角は不可）
+const PASSWORD_MIN = 10;
+const PASSWORD_RULE_TEXT = `パスワードは<strong>英字・数字・記号をすべて含む${PASSWORD_MIN}文字以上</strong>にしてください（半角。記号の例：! # $ % & * + - = ? @ _）。`;
+
+// 初期化用の仮のパスワード：見分けにくい文字（0 O 1 l I）を除いた英字・数字と記号で12文字。決まりに必ず合う
+function tempPassword() {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz', digits = '23456789', marks = '!#$%&*+-=?@';
+  const all = letters + digits + marks;
+  const pick = s => s[crypto.randomInt(s.length)];
+  const chars = [pick(letters), pick(digits), pick(marks)];
+  while (chars.length < 12) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [chars[i], chars[j]] = [chars[j], chars[i]]; }
+  return chars.join('');
+}
+
+// 決まりに合わなければ理由の文、合えば null
+function passwordProblem(pw) {
+  pw = typeof pw === 'string' ? pw : '';
+  if (/[^\x21-\x7E]/.test(pw)) return 'パスワードに使えるのは半角の英字・数字・記号です（空白・全角の文字は使えません）';
+  const missing = [];
+  if (!/[A-Za-z]/.test(pw)) missing.push('英字');
+  if (!/[0-9]/.test(pw)) missing.push('数字');
+  if (!/[^A-Za-z0-9]/.test(pw)) missing.push('記号');
+  if (pw.length < PASSWORD_MIN || missing.length) {
+    return `パスワードは英字・数字・記号をすべて含む${PASSWORD_MIN}文字以上にしてください`
+      + (missing.length ? `（${missing.join('・')}が入っていません）` : `（今は${pw.length}文字です）`);
+  }
+  return null;
+}
+
 // ===== ログイン失敗回数チェック =====
 const MAX_ATTEMPTS = 5;
 const LOCK_MINUTES = 30;
@@ -500,26 +531,27 @@ app.get('/logout', requireLogin, async (req, res) => {
 // ===== パスワード変更画面（職員・管理者共通） =====
 app.get('/change-password', requireLogin, (req, res) => {
   const isForced = req.session.mustChangePassword;
-  const msg = req.query.result ? `<div class="message message-success">✅ ${decodeURIComponent(req.query.result)}</div>` : '';
-  const err = req.query.error ? `<div class="message message-error">❌ ${decodeURIComponent(req.query.error)}</div>` : '';
+  const msg = req.query.result ? `<div class="message message-success">✅ ${escapeHtml(String(req.query.result))}</div>` : '';
+  const err = req.query.error ? `<div class="message message-error">❌ ${escapeHtml(String(req.query.error))}</div>` : '';
 
   res.send(layout('パスワード変更', `
     <div class="card">
       <h2>🔑 パスワード変更</h2>
       ${isForced ? '<div class="message message-warning">⚠️ 初回ログインのため、パスワードを変更してください。</div>' : ''}
       ${msg}${err}
+      <div class="message message-info" style="font-size:0.85rem;">${PASSWORD_RULE_TEXT}</div>
       <form method="POST" action="/change-password">
         <div class="form-group">
           <label>現在のパスワード</label>
           <input type="password" name="current_password" required placeholder="現在のパスワード">
         </div>
         <div class="form-group">
-          <label>新しいパスワード（6文字以上）</label>
-          <input type="password" name="new_password" required minlength="6" placeholder="新しいパスワード">
+          <label>新しいパスワード（英字・数字・記号を含む${PASSWORD_MIN}文字以上）</label>
+          <input type="password" name="new_password" required minlength="${PASSWORD_MIN}" autocomplete="new-password" placeholder="新しいパスワード">
         </div>
         <div class="form-group">
           <label>新しいパスワード（確認）</label>
-          <input type="password" name="confirm_password" required minlength="6" placeholder="もう一度入力">
+          <input type="password" name="confirm_password" required minlength="${PASSWORD_MIN}" autocomplete="new-password" placeholder="もう一度入力">
         </div>
         <button type="submit" class="btn btn-primary" style="margin-top:8px;">
           🔑 パスワードを変更する
@@ -543,8 +575,12 @@ app.post('/change-password', requireLogin, async (req, res) => {
   if (new_password !== confirm_password) {
     return res.redirect(`/change-password?error=${encodeURIComponent('新しいパスワードが一致しません')}`);
   }
-  if (new_password.length < 6) {
-    return res.redirect(`/change-password?error=${encodeURIComponent('パスワードは6文字以上で設定してください')}`);
+  const problem = passwordProblem(new_password);
+  if (problem) {
+    return res.redirect(`/change-password?error=${encodeURIComponent(problem)}`);
+  }
+  if (bcrypt.compareSync(new_password, user.password_hash)) {
+    return res.redirect(`/change-password?error=${encodeURIComponent('今のパスワードと違うパスワードにしてください')}`);
   }
 
   const hash = bcrypt.hashSync(new_password, 10);
@@ -1108,7 +1144,7 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
         CSVファイルの形式：<strong>出勤用ID,パスワード,権限,設置場所</strong>（設置場所は省略できます）<br>
         権限は <code>staff</code>（職員）または <code>admin</code>（管理者）<br>
         設置場所は、出勤登録してよい場所の名前（QRコード管理の名称。例 <code>K</code>）。2か所以上は <code>K;1</code> のように「;」で区切ります。空欄の人はどこでも登録できます。<br>
-        ※ 初回登録時は必ずパスワード変更を促す設定になります<br>
+        ※ 初回登録時は必ずパスワード変更を促す設定になります（変更後のパスワードは英字・数字・記号をすべて含む${PASSWORD_MIN}文字以上）<br>
         ※ 登録済みの出勤用IDの行は、設置場所が書いてあればその設置場所だけを置き換えます（パスワード・権限は変えません）
       </div>
       <form id="uploadForm" method="POST" action="/admin/users/upload" enctype="multipart/form-data" style="margin-bottom:24px;">
@@ -1215,7 +1251,7 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
       <div style="margin-top:24px;">
         
         <h3 style="font-size:1rem; color:#4f46e5; margin-bottom:12px;">パスワード初期化</h3>
-        <div class="message message-info" style="font-size:0.85rem;">初期化すると出勤用IDと同じパスワードにリセットされます。<br>次回ログイン時に本人がパスワードを変更する必要があります。</div>
+        <div class="message message-info" style="font-size:0.85rem;">初期化すると、推測されにくい仮のパスワードに変わり、画面に1回だけ表示されます。本人に伝えてください。<br>ロックも解除されます。次回ログイン時に本人がパスワードを変更する必要があります。</div>
         <form method="POST" action="/admin/users/${user.id}/reset-password" style="margin-bottom:20px;">
           <button type="submit" class="btn btn-danger" style="width:auto; padding:10px 24px;" onclick="return confirm('パスワードを初期化しますか？')">🔄 パスワードを初期化する</button>
         </form>
@@ -1241,12 +1277,44 @@ app.get('/admin/users/:id/edit', requireAdmin, async (req, res) => {
   `, { role: 'admin' }));
 });
 
+// パスワード初期化：仮のパスワード（英字・数字・記号を含む12文字）にし、画面に1回だけ表示する。
+// 仮のパスワードはアドレスに載せないよう、転送せずにこの応答で表示する
+app.post('/admin/users/:id/reset-password', requireAdmin, async (req, res) => {
+  const user = await queryOne('SELECT id, attendance_code FROM users WHERE id = $1', [req.params.id]);
+  if (!user) return res.redirect('/admin/users');
+  const temp = tempPassword();
+  await query(
+    'UPDATE users SET password_hash = $1, must_change_password = 1, failed_attempts = 0, locked_until = NULL WHERE id = $2',
+    [bcrypt.hashSync(temp, 10), user.id]
+  );
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'PASSWORD_RESET',
+    `出勤用ID:${user.attendance_code}`, req.ip);
+  res.set('Cache-Control', 'no-store');
+  res.send(layout('パスワード初期化', `
+    <div class="card">
+      <h2>パスワードを初期化しました</h2>
+      <div class="message message-success">✅ 出勤用ID ${escapeHtml(user.attendance_code)} のパスワードを、次の仮のパスワードにしました。</div>
+      <div class="confirm-item"><span class="label">仮のパスワード</span>
+        <span class="value" style="font-family:monospace; font-size:1.3rem; letter-spacing:1px;">${escapeHtml(temp)}</span></div>
+      <div class="message message-warning" style="font-size:0.85rem; margin-top:16px;">
+        この画面を閉じると、仮のパスワードはもう表示できません。控えてから本人に伝えてください。<br>
+        本人が次にログインすると、パスワード変更の画面になります。
+      </div>
+      <p style="margin-top:20px;">
+        <a href="/admin/users/${user.id}/edit" class="btn btn-secondary" style="display:inline-block; width:auto;">← ユーザー編集へ</a>
+      </p>
+    </div>
+  `, { role: 'admin' }));
+});
+
 // パスワード変更（管理者による）
 app.post('/admin/users/:id/password', requireAdmin, async (req, res) => {
   const { password, password_confirm, must_change } = req.body;
   if (password !== password_confirm) {
     return res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent('パスワードが一致しません')}`);
   }
+  const problem = passwordProblem(password);
+  if (problem) return res.redirect(`/admin/users/${req.params.id}/edit?result=${encodeURIComponent(problem)}`);
   const hash = bcrypt.hashSync(password, 10);
   const mustChange = must_change ? 1 : 0;
   await query('UPDATE users SET password_hash = $1, must_change_password = $2, failed_attempts = 0, locked_until = NULL WHERE id = $3',
@@ -1317,7 +1385,7 @@ app.get('/admin/logs', requireAdmin, async (req, res) => {
     WRONG_PLACE: '決められた場所以外での読み取り（記録せず）', USER_LOCATIONS: '設置場所の変更', CSV_UPLOAD: 'CSVアップロード',
     USER_TOGGLE: 'ユーザー有効/無効変更', USER_DELETE: 'ユーザー削除',
     USER_UNLOCK: 'ロック解除', QR_ROTATE: 'QRコードを新しくした', OLD_QR: '使えなくなったQRコードを読んだ',
-    PASSWORD_CHANGE: 'パスワード変更', ROLE_CHANGE: '権限変更', EXCEL_EXPORT: 'Excel出力',
+    PASSWORD_CHANGE: 'パスワード変更', PASSWORD_RESET: 'パスワード初期化', ROLE_CHANGE: '権限変更', EXCEL_EXPORT: 'Excel出力',
   };
   const rows = logs.map(l => `
     <tr>
