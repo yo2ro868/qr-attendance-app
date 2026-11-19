@@ -1,20 +1,20 @@
 Attribute VB_Name = "MatchingMacro"
 Option Explicit
-' 出勤・休暇管理データ の［最新を読み込む］（目次）・［申請を取り込む］（申請一覧）ボタン：休暇申請シート・テレワーク予定表・
+' 出勤・休暇管理データ の［最新を読み込む］（目次）・［申請を取り込む］（申請一覧）ボタン：申請・報告シート・テレワーク予定表・
 ' 超過勤務等命令簿・フレックスの申告と割振りを読み直し、休暇等・出勤簿・申請一覧・テレワーク一覧・超過勤務の読み込み・フレックスを最新にする（開いたときには読み直さない）。
 ' フレックスは、所属長の承認済みになった単位期間（フレックス一覧の取り込みが「取り込む」）を「フレックスの日別」に写す（承認時の内容として残す）。
-' 読み込むのは保存された内容なので、同じ Excel で開いている休暇申請シートに未保存の変更があれば、先に保存するか聞く。
+' 読み込むのは保存された内容なので、同じ Excel で開いている申請・報告シートに未保存の変更があれば、先に保存するか聞く。
 
 Public Sub ImportRequests()
     Dim wb As Workbook, unsaved As String
     For Each wb In Workbooks
-        If (wb.Name Like "休暇申請シート[　 _]*" Or wb.Name Like "休暇申請_*") And Not wb.Saved Then unsaved = unsaved & vbCrLf & wb.Name
+        If (wb.Name Like "申請・報告シート[　 _]*" Or wb.Name Like "休暇申請_*") And Not wb.Saved Then unsaved = unsaved & vbCrLf & wb.Name
     Next wb
     If unsaved <> "" Then
-        If MsgBox("保存されていない休暇申請シートがあります。保存してから取り込みますか？" & vbCrLf & unsaved & vbCrLf & vbCrLf & _
+        If MsgBox("保存されていない申請・報告シートがあります。保存してから取り込みますか？" & vbCrLf & unsaved & vbCrLf & vbCrLf & _
                   "［いいえ］を押すと、保存されている内容だけを取り込みます。", vbYesNo + vbQuestion) = vbYes Then
             For Each wb In Workbooks
-                If (wb.Name Like "休暇申請シート[　 _]*" Or wb.Name Like "休暇申請_*") And Not wb.Saved Then wb.Save
+                If (wb.Name Like "申請・報告シート[　 _]*" Or wb.Name Like "休暇申請_*") And Not wb.Saved Then wb.Save
             Next wb
         End If
     End If
@@ -30,7 +30,7 @@ Public Sub ImportRequests()
     Dim flexTaken As Long
     Application.StatusBar = "承認済みのフレックスを取り込んでいます..."
     flexTaken = TakeFlexSnapshot()
-    ThisWorkbook.Worksheets("休暇申請シートの読み込み").Range("B5").Value = Now
+    ThisWorkbook.Worksheets("申請・報告シートの読み込み").Range("B5").Value = Now
     FitRows
     Application.StatusBar = False
     Application.Cursor = xlDefault
@@ -61,7 +61,7 @@ Failed:
     MsgBox "取り込めませんでした：" & Err.Description, vbExclamation
 End Sub
 
-' ［超過勤務を転記］ボタン（超過勤務シート）：休暇申請シートの超過勤務等命令簿を読み直し、B2 の月の所属長の確認済みの分を
+' ［超過勤務を転記］ボタン（超過勤務シート）：申請・報告シートの超過勤務等命令簿を読み直し、B2 の月の所属長の確認済みの分を
 ' 「超過勤務」シート（1人1か月の計）と「超過勤務の日別」シート（日ごとの行と照合）に値で写す。同じ人・同じ月を前に写していれば置き換える。
 ' 確認待ち（命令簿の所属長の確認日が空）の人は写さない。
 Public Sub TransferOvertime()
@@ -163,7 +163,7 @@ Private Function TakeFlexSnapshot() As Long
     Application.ScreenUpdating = True
     ' 写した内容を読む表（一覧の取り込み・注意、出勤簿の備考）を読み直す
     list.QueryTable.Refresh False
-    ThisWorkbook.Worksheets("休暇申請シートの読み込み").ListObjects("フレックス_出勤簿").QueryTable.Refresh False
+    ThisWorkbook.Worksheets("申請・報告シートの読み込み").ListObjects("フレックス_出勤簿").QueryTable.Refresh False
     Application.Calculate
     TakeFlexSnapshot = keys.Count
 End Function
@@ -295,7 +295,7 @@ Public Sub MakeScheduleSheet()
     Application.Calculate
     last = FIRST_ROW - 1 + WorksheetFunction.CountIf(src.Range("AK" & FIRST_ROW & ":AK" & (FIRST_ROW + 499)), "?*")
     If last < FIRST_ROW Then
-        MsgBox "職員名簿に部が入っている人がいません（職員名簿の G 列に部、H 列に課を入れてください）。", vbExclamation
+        MsgBox "職員名簿に職員がいません（職員名簿に出勤用ID と氏名を入れてください）。", vbExclamation
         Exit Sub
     End If
     On Error GoTo Failed
@@ -420,7 +420,7 @@ End Function
 ' 一覧のシートの表を見やすくする：折り返しの列（注意・業務内容など。列全体が折り返し）は幅をそのままにし、ほかの列は中身に合わせて広げ
 ' （狭くはしない。広すぎるときは60まで）、行の高さを折り返した文が見える高さに合わせる
 Private Sub FitRows()
-    Dim nm As Variant, ws As Worksheet, lo As ListObject, lc As ListColumn, w As Double
+    Dim nm As Variant, ws As Worksheet, lo As ListObject, lc As ListColumn, w As Double, sh As Shape
     On Error Resume Next
     For Each nm In Array("申請一覧", "テレワーク一覧", "テレワーク報告", "フレックス", "フレックスの日別", "フレックスの読み込み", _
                          "超過勤務", "超過勤務の日別", "超過勤務の読み込み")
@@ -438,6 +438,12 @@ Private Sub FitRows()
                 Next lc
             Next lo
             ws.UsedRange.Rows.AutoFit
+            ' ボタンのある行（2行目など）は、ボタンが入る高さに戻す（行が低くなると、ボタンが下の表の見出しや文字にかぶって読めなくなる）
+            For Each sh In ws.Shapes
+                With sh.TopLeftCell.EntireRow
+                    If .RowHeight < sh.Height + 4 Then .RowHeight = sh.Height + 4
+                End With
+            Next sh
         End If
     Next nm
 End Sub
@@ -603,10 +609,10 @@ Private Sub ReplaceRows(dst As ListObject, src As ListObject, ym As String, ids 
 End Sub
 
 ' ===== テレワーク実施報告書（テレワーク報告シートの［実施報告書を見る］［実施報告書をPDFで保存］） =====
-' 報告は、その職員の休暇申請シートの「テレワーク実施報告書」シート（別紙３の様式）で見る。休暇申請シートは読み取り専用で開き、
-' 印刷する番号（M2）に報告の番号を入れる（保存しないので、休暇申請シートは変わらない）。
+' 報告は、その職員の申請・報告シートの「テレワーク実施報告書」シート（別紙３の様式）で見る。申請・報告シートは読み取り専用で開き、
+' 印刷する番号（M2）に報告の番号を入れる（保存しないので、申請・報告シートは変わらない）。
 Private Const TW_PRINT As String = "テレワーク実施報告書"
-Private Const TW_PDF_DIR As String = "テレワーク実施報告書"     ' PDF を置くフォルダ（休暇申請シートのフォルダと同じ場所に作る）
+Private Const TW_PDF_DIR As String = "テレワーク実施報告書"     ' PDF を置くフォルダ（申請・報告シートのフォルダと同じ場所に作る）
 
 ' ［実施報告書を見る］：選んでいる行の報告を、実施報告書の様式で表示する（印刷・PDF の保存は、表示した画面からもできる）
 Public Sub ShowTwReport()
@@ -652,7 +658,7 @@ Public Sub SaveTwReports()
     ThisWorkbook.Activate
     Application.ScreenUpdating = True
     MsgBox n & " 件の実施報告書を PDF で保存しました。" & vbCrLf & outDir & _
-           IIf(skipped <> "", vbCrLf & vbCrLf & "開けなかった休暇申請シート：" & skipped, ""), vbInformation
+           IIf(skipped <> "", vbCrLf & vbCrLf & "開けなかった申請・報告シート：" & skipped, ""), vbInformation
 End Sub
 
 ' テレワーク報告シートで選んでいる、表「テレワーク報告一覧」の行（表の中の何行目か）。なければ説明を出して Nothing
@@ -674,7 +680,7 @@ Private Function TwSelectedRows(lo As ListObject) As Collection
     Set TwSelectedRows = result
 End Function
 
-' 休暇申請シートを読み取り専用で開く（同じ名前のブックを開いていればそれを使う）。opened は、このマクロが開いたら True。
+' 申請・報告シートを読み取り専用で開く（同じ名前のブックを開いていればそれを使う）。opened は、このマクロが開いたら True。
 ' quiet が True のときは、見つからなくてもメッセージを出さない（まとめて保存するとき）
 Private Function OpenLeaveSheet(ByVal fileName As String, opened As Boolean, Optional ByVal quiet As Boolean = False) As Workbook
     Dim folder As String, path As String
@@ -686,16 +692,16 @@ Private Function OpenLeaveSheet(ByVal fileName As String, opened As Boolean, Opt
     folder = LeaveFolder()
     path = folder & "\" & fileName
     If folder = "" Or fileName = "" Or Dir(path) = "" Then
-        If Not quiet Then MsgBox "休暇申請シートが見つかりません：" & vbCrLf & path & vbCrLf & "（休暇申請シートの読み込みシートの B2 のフォルダを確かめてください）", vbExclamation
+        If Not quiet Then MsgBox "申請・報告シートが見つかりません：" & vbCrLf & path & vbCrLf & "（申請・報告シートの読み込みシートの B2 のフォルダを確かめてください）", vbExclamation
         Exit Function
     End If
     Set OpenLeaveSheet = Workbooks.Open(Filename:=path, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
     opened = True
 End Function
 
-' 休暇申請シートのフォルダ（休暇申請シートの読み込みシートの B2。最後の \ は除く）
+' 申請・報告シートのフォルダ（申請・報告シートの読み込みシートの B2。最後の \ は除く）
 Private Function LeaveFolder() As String
-    LeaveFolder = Trim(CStr(ThisWorkbook.Worksheets("休暇申請シートの読み込み").Range("B2").Value))
+    LeaveFolder = Trim(CStr(ThisWorkbook.Worksheets("申請・報告シートの読み込み").Range("B2").Value))
     If Right(LeaveFolder, 1) = "\" Then LeaveFolder = Left(LeaveFolder, Len(LeaveFolder) - 1)
 End Function
 
@@ -714,12 +720,12 @@ Private Function SetTwNumber(wb As Workbook, lo As ListObject, r As Long) As Boo
     SetTwNumber = True
 End Function
 
-' PDF を置くフォルダ（休暇申請シートのフォルダと同じ場所の「テレワーク実施報告書」。なければ作る）
+' PDF を置くフォルダ（申請・報告シートのフォルダと同じ場所の「テレワーク実施報告書」。なければ作る）
 Private Function TwPdfDir() As String
     Dim folder As String
     folder = LeaveFolder()
     If folder = "" Or InStrRev(folder, "\") = 0 Then
-        MsgBox "休暇申請シートの読み込みシートの B2 に、休暇申請シートのフォルダを入れてください。", vbExclamation
+        MsgBox "申請・報告シートの読み込みシートの B2 に、申請・報告シートのフォルダを入れてください。", vbExclamation
         Exit Function
     End If
     TwPdfDir = Left(folder, InStrRev(folder, "\") - 1) & "\" & TW_PDF_DIR
@@ -727,12 +733,12 @@ Private Function TwPdfDir() As String
 End Function
 
 ' ===== ［命令簿をPDFで保存］（命令簿の保存シート・目次）：所属長の確認済みの超過勤務等命令簿を、1人1か月1ファイルの PDF で保管する =====
-' 超過勤務の読み込みシートの表（超勤_月）で状況が「確認済み」の月を、休暇申請シートを読み取り専用で開いて、その月のシート（超勤 R8.11 など）を PDF にする。
+' 超過勤務の読み込みシートの表（超勤_月）で状況が「確認済み」の月を、申請・報告シートを読み取り専用で開いて、その月のシート（超勤 R8.11 など）を PDF にする。
 ' 保存した記録（命令簿の保存シートの6行目から）に、シートの内容から作った文字（内容の記録）を残す。同じ内容なら保存しない。
 ' 保存したあとで直された月は、前の PDF を残したまま「…（2）.pdf」「…（3）.pdf」の名前で保存する。
 Private Const OT_LOG As String = "命令簿の保存"
 Private Const OT_LOG_FIRST As Long = 6         ' 記録の最初の行（5行目は見出し）
-Private Const OT_PDF_DIR As String = "超過勤務等命令簿"     ' 保存先が空欄のとき：休暇申請シートのフォルダと同じ場所に作るフォルダ
+Private Const OT_PDF_DIR As String = "超過勤務等命令簿"     ' 保存先が空欄のとき：申請・報告シートのフォルダと同じ場所に作るフォルダ
 
 Public Sub SaveOvertimePdfs()
     Dim lo As ListObject, logWs As Worksheet, outDir As String
@@ -769,7 +775,7 @@ Public Sub SaveOvertimePdfs()
             nm = CellText(lo, i, "氏名")
             fileName = CellText(lo, i, "ファイル名")
             sheetName = OtSheetName(ym)
-            ' 休暇申請シートは1回だけ開く（開けなかったものは Nothing を覚えておく）
+            ' 申請・報告シートは1回だけ開く（開けなかったものは Nothing を覚えておく）
             If Not books.Exists(fileName) Then
                 Set wb = OpenLeaveSheet(fileName, opened, True)
                 If wb Is Nothing Then
@@ -844,12 +850,12 @@ Failed:
     Resume Done
 End Sub
 
-' 2026-11 → 超勤 R8.11（休暇申請シートの月のシートの名前）
+' 2026-11 → 超勤 R8.11（申請・報告シートの月のシートの名前）
 Private Function OtSheetName(ByVal ym As String) As String
     OtSheetName = "超勤 R" & (CLng(Left$(ym, 4)) - 2018) & "." & CLng(Mid$(ym, 6, 2))
 End Function
 
-' 保存先：命令簿の保存シートの B2。空欄なら、休暇申請シートのフォルダと同じ場所の「超過勤務等命令簿」（なければ作る）
+' 保存先：命令簿の保存シートの B2。空欄なら、申請・報告シートのフォルダと同じ場所の「超過勤務等命令簿」（なければ作る）
 Private Function OtPdfDir() As String
     Dim folder As String
     folder = Trim$(CStr(ThisWorkbook.Worksheets(OT_LOG).Range("B2").Value))
@@ -857,7 +863,7 @@ Private Function OtPdfDir() As String
     If folder = "" Then
         folder = LeaveFolder()
         If folder = "" Or InStrRev(folder, "\") = 0 Then
-            MsgBox "命令簿の保存シートの B2 に保存先のフォルダを入れてください（空欄なら、休暇申請シートの読み込みシートの B2 のフォルダの隣に作ります）。", vbExclamation
+            MsgBox "命令簿の保存シートの B2 に保存先のフォルダを入れてください（空欄なら、申請・報告シートの読み込みシートの B2 のフォルダの隣に作ります）。", vbExclamation
             Exit Function
         End If
         folder = Left$(folder, InStrRev(folder, "\") - 1) & "\" & OT_PDF_DIR
@@ -894,8 +900,8 @@ Private Function SheetHash(ws As Worksheet) As String
     SheetHash = Right$("0000000" & Hex$(CLng(h1)), 8) & Right$("0000000" & Hex$(CLng(h2)), 8)
 End Function
 
-' ===== ［申告・割振り簿を見る］（フレックスシート）：選んでいる行の単位期間を、その職員の休暇申請シートの「申告・割振り簿」（総務課の様式）で表示する =====
-' 休暇申請シートは読み取り専用で開き、管理者だけが見るシート（ふだんは非表示）を表示して、単位期間（F5・H5・I5 の年・月・日）にその開始日を入れる。保存はしない
+' ===== ［申告・割振り簿を見る］（フレックスシート）：選んでいる行の単位期間を、その職員の申請・報告シートの「申告・割振り簿」（総務課の様式）で表示する =====
+' 申請・報告シートは読み取り専用で開き、管理者だけが見るシート（ふだんは非表示）を表示して、単位期間（F5・H5・I5 の年・月・日）にその開始日を入れる。保存はしない
 Private Const FLEX_BOOK As String = "申告・割振り簿"
 
 Public Sub ShowFlexPeriod()

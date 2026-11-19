@@ -4,7 +4,7 @@
 - docProps/core.xml の作成者（dc:creator）・最終更新者（cp:lastModifiedBy）を空にする
 - docProps/app.xml の会社名（Company）・管理者（Manager）を空にする
 - xl/workbook.xml の workbookPr に filterPrivacy="1"（Excel の「保存時にファイルのプロパティから個人情報を削除する」）を入れる。
-  このひな形から作った休暇申請シートなどを、あとで別のPCで保存しても、保存した人の名前が残らない
+  このひな形から作った申請・報告シートなどを、あとで別のPCで保存しても、保存した人の名前が残らない
 中身（シート・式・マクロ）は変えない。zip の中の、ほかのファイルはそのまま写す。
 """
 import re

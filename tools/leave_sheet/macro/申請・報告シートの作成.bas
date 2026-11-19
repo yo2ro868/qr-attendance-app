@@ -1,13 +1,14 @@
 Attribute VB_Name = "LeaveSheetMaker"
 Option Explicit
-' 休暇申請シートを職員の数だけ作る・全員分を更新する（管理者用。休暇申請シートの作成.xlsm の「設定」シートのボタンから実行する）。
+' 申請・報告シートを職員の数だけ作る・全員分を更新する（管理者用。申請・報告シートの作成.xlsm の「設定」シートのボタンから実行する）。
 ' 出勤・休暇管理データ の「職員名簿」（出勤用ID・氏名）と「休暇等」シート（年ごとの合計・本年使用の調整）を読み、
-' 各休暇申請シートの非表示の「管理」シートに 出勤用ID・氏名・年・合計（分）・本年使用の調整（分）を書き込む。
-'   ［休暇申請シートを作成］… 職員名簿の全員について、まだない人の休暇申請シートをひな形から作る（あれば作らない・上書きしない）
-'   ［休暇申請シートを更新］… 作成先にある全員の休暇申請シートの「管理」シートを、休暇等シートの今の値に書き換える
-'   ［様式を移行］…… 様式の古い休暇申請シートを、書いてある申請の行と超過勤務等命令簿の月のシート・フレックスの申告と割振りを残して新しいひな形の様式にする
-'   ［超過勤務の月を追加］… 作成先にある全員の休暇申請シートに、B7 の月の超過勤務等命令簿のシート（超勤 R8.12 など）を作る
-'   ［申告・割振り簿を見る］… B9 の出勤用ID の人の休暇申請シートを読み取り専用で開き、管理者だけが見る「申告・割振り簿」を表示する
+' 各申請・報告シートの非表示の「管理」シートに 出勤用ID・氏名・年・合計（分）・本年使用の調整（分）を書き込む。
+'   ［申請・報告シートを作成］… 職員名簿の全員について、まだない人の申請・報告シートをひな形から作る（あれば作らない・上書きしない）
+'   ［申請・報告シートを更新］… 作成先にある全員の申請・報告シートの「管理」シートを、休暇等シートの今の値に書き換える
+'   ［様式を移行］…… 様式の古い申請・報告シートを、書いてある申請の行と超過勤務等命令簿の月のシート・フレックスの申告と割振りを残して新しいひな形の様式にする
+'   ［超過勤務の月を追加］… 作成先にある全員の申請・報告シートに、B7 の月の超過勤務等命令簿のシート（超勤 R8.12 など）を作る
+'   ［申告・割振り簿を見る］… B9 の出勤用ID の人の申請・報告シートを読み取り専用で開き、管理者だけが見る「申告・割振り簿」を表示する
+'   ［古い超過勤務の月を外す］… 全員の申請・報告シートから、B10 の月より前の超過勤務等命令簿の月のシートのうち、確認済み・転記済み・PDF 保存済みのものを外す
 
 Private Const DAY_MIN As Double = 465     ' 年次休暇の1日＝7時間45分＝465分
 Private Const STAFF_LAST As Long = 501    ' 出勤・休暇管理データ の職員名簿の最後の行
@@ -34,7 +35,7 @@ Private staff As Variant      ' 職員名簿 A:B（出勤用ID・氏名）
 Private keys As Variant       ' 計算用 H（出勤用ID|年）
 Private totals As Variant     ' 計算用 K（合計・分）
 Private adjust As Variant     ' 休暇等 H:I（本年使用（手入力）：日・時間）
-Private holidays As Variant   ' 祝日 A（休暇申請シートの日数の計算で除く日）
+Private holidays As Variant   ' 祝日 A（申請・報告シートの日数の計算で除く日）
 Private formVersion As String ' ひな形の様式の版（管理シート B11）
 Private carries As Variant    ' 計算用 J（繰越分・分）
 Private grants As Variant     ' 計算用 P（本年分・日）
@@ -56,7 +57,7 @@ Public Sub AddOvertimeMonths()
 End Sub
 
 ' ===== 超過勤務等命令簿：月のシート =====
-' 休暇申請シートの非表示の「超勤ひな形」シート（tools/overtime/add_overtime_sheet.ps1 が入れる）を写して「超勤 R8.12」のような月のシートを作る。
+' 申請・報告シートの非表示の「超勤ひな形」シート（tools/overtime/add_overtime_sheet.ps1 が入れる）を写して「超勤 R8.12」のような月のシートを作る。
 ' W1 に月の1日、BH1 に前月のシートの BH2（前月の最終日の退庁時刻。25:00 のように日をまたぐ分が1日の欄に入る）を指す式を書き、
 ' 月にない日（30日の月の31日など）の行を隠す。前月のシートがなければ BH1 は空（必要なら管理者が手で時刻を入れる）。
 
@@ -77,8 +78,8 @@ Public Sub AddMonthAll(ByVal quiet As Boolean)
     ym = DateSerial(Year(cfg.Range("B7").Value), Month(cfg.Range("B7").Value), 1)
     If Right$(outDir, 1) <> "\" Then outDir = outDir & "\"
     If Not quiet Then
-        If MsgBox("作成先の全員の休暇申請シートに、超過勤務等命令簿の「" & OvertimeSheetName(ym) & "」のシートを作ります。" & vbCrLf & _
-                  "職員や所属長が休暇申請シートを開いていない時間に実行してください。" & vbCrLf & vbCrLf & _
+        If MsgBox("作成先の全員の申請・報告シートに、超過勤務等命令簿の「" & OvertimeSheetName(ym) & "」のシートを作ります。" & vbCrLf & _
+                  "職員や所属長が申請・報告シートを開いていない時間に実行してください。" & vbCrLf & vbCrLf & _
                   "実行しますか？", vbYesNo + vbQuestion) <> vbYes Then Exit Sub
     End If
     Application.ScreenUpdating = False
@@ -86,7 +87,7 @@ Public Sub AddMonthAll(ByVal quiet As Boolean)
     Application.AskToUpdateLinks = False
 
     Dim names As New Collection, f As String, item As Variant
-    f = Dir(outDir & "休暇申請*.xlsx")
+    f = Dir(outDir & "*.xlsx")     ' 申請・報告シート（今の名前）と 休暇申請シート・休暇申請_（前の名前）を IsSheetFile で選ぶ
     Do While f <> ""
         If IsSheetFile(f) Then names.Add f
         f = Dir()
@@ -109,7 +110,7 @@ Public Sub AddMonthAll(ByVal quiet As Boolean)
     If Not quiet Then MsgBox "「" & OvertimeSheetName(ym) & "」を作ったもの " & done & " 件、そのほか " & other & " 件です（結果シートを確かめてください）。", vbInformation
 End Sub
 
-' 休暇申請シート1つに月のシートを作る。結果の文を返す
+' 申請・報告シート1つに月のシートを作る。結果の文を返す
 Private Function AddMonthOne(path As String, ym As Date) As String
     On Error GoTo Failed
     Dim wb As Workbook, note As String
@@ -191,10 +192,200 @@ Private Function AddMonthSheet(wb As Workbook, ym As Date) As String
     AddMonthSheet = "作りました（" & nm & "）"
 End Function
 
+' ===== 超過勤務等命令簿：古い月のシートを外す =====
+' 申請・報告シートが月ごとに重くならないように、B10 の月より前の月のシートを外す。外すのは次の3つがそろった月だけ：
+'   ・所属長の確認日（AC69）がある
+'   ・出勤・休暇管理データ の「超過勤務」シート（表 転記_月計）に写してある（［超過勤務を転記］済み）
+'   ・出勤・休暇管理データ の「命令簿の保存」シートに PDF の記録があり、その内容の記録が今のシートと同じ（PDF のあとで直されていない）
+' 外す月の翌月のシートの BH1（前月の最終日の退庁時刻を指す式）は、外す前に値にする。外したシートは元に戻せない（PDF が保管用）。
+
+Public Sub RemoveOldOvertimeMonths()
+    Dim cfg As Worksheet, res As Worksheet
+    Set cfg = ThisWorkbook.Worksheets("設定")
+    Set res = ThisWorkbook.Worksheets("結果")
+    Dim matchPath As String, outDir As String, cutoff As Date, latest As Date, problem As String
+    matchPath = CleanPath(cfg.Range("B3").Value)
+    outDir = CleanPath(cfg.Range("B5").Value)
+    latest = DateSerial(Year(Date), Month(Date) - 2, 1)
+    If Not FileExists(matchPath) Then problem = "出勤・休暇管理データ のファイルが見つかりません（B3）。"
+    If problem = "" And (outDir = "" Or Dir(outDir, vbDirectory) = "") Then problem = "作成先のフォルダが見つかりません（B5）。"
+    If problem = "" And Not IsDate(cfg.Range("B10").Value) Then problem = "外す月の境目を入れてください（B10。例 2025/4。この月より前の月を外します）。"
+    If problem = "" Then
+        cutoff = DateSerial(Year(cfg.Range("B10").Value), Month(cfg.Range("B10").Value), 1)
+        If cutoff > latest Then problem = "B10 は " & Format(latest, "yyyy/m") & " より前にしてください（今月と前月のシートは外せません）。"
+    End If
+    res.Range("A2:E" & res.Rows.Count).ClearContents
+    If problem <> "" Then
+        res.Range("D2").Value = problem
+        MsgBox problem, vbExclamation
+        Exit Sub
+    End If
+    If Right$(outDir, 1) <> "\" Then outDir = outDir & "\"
+    If MsgBox("全員の申請・報告シートから、「" & OvertimeSheetName(cutoff) & "」より前の超過勤務等命令簿の月のシートを外します。" & vbCrLf & vbCrLf & _
+              "外すのは、所属長の確認済みで、出勤・休暇管理データ に転記済み、PDF で保存済み（そのあと直されていない）の月だけです。" & vbCrLf & _
+              "外したシートは元に戻せません（保管用の PDF が残ります）。" & vbCrLf & _
+              "先に 出勤・休暇管理データ で［命令簿をPDFで保存］を押して、上書き保存しておいてください。" & vbCrLf & _
+              "職員や所属長が申請・報告シートを開いていない時間に実行してください。" & vbCrLf & vbCrLf & _
+              "実行しますか？", vbYesNo + vbQuestion + vbDefaultButton2) <> vbYes Then Exit Sub
+
+    Dim pdfs As Object, moved As Object
+    If Not ReadOvertimeRecords(matchPath, pdfs, moved) Then Exit Sub
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.AskToUpdateLinks = False
+
+    Dim names As New Collection, f As String, item As Variant
+    f = Dir(outDir & "*.xlsx")     ' 申請・報告シート（今の名前）と 休暇申請シート・休暇申請_（前の名前）を IsSheetFile で選ぶ
+    Do While f <> ""
+        If IsSheetFile(f) Then names.Add f
+        f = Dir()
+    Loop
+    Dim row As Long, note As String, total As Long, parts() As String, id As String, nm As String
+    row = 2
+    For Each item In names
+        parts = NameParts(CStr(item))
+        id = parts(1)
+        nm = ""
+        If UBound(parts) >= 2 Then nm = parts(2)
+        note = RemoveOldOne(outDir & item, id, cutoff, pdfs, moved, total)
+        WriteResult res, row, id, nm, CStr(item), note
+        row = row + 1
+    Next item
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    res.Activate
+    MsgBox "外した月のシートは全部で " & total & " 枚です。残した月とその理由は、結果シートで確かめてください。", vbInformation
+End Sub
+
+' 出勤・休暇管理データ から、PDF の記録（出勤用ID|年月 → いちばん新しい内容の記録）と、転記済みの 出勤用ID|年月 を読む
+Private Function ReadOvertimeRecords(matchPath As String, pdfs As Object, moved As Object) As Boolean
+    Dim src As Workbook, openedHere As Boolean, ws As Worksheet, lo As ListObject, r As Long, last As Long
+    Set pdfs = CreateObject("Scripting.Dictionary")
+    Set moved = CreateObject("Scripting.Dictionary")
+    Set src = FindOpenWorkbook(matchPath)
+    If src Is Nothing Then
+        Set src = Workbooks.Open(Filename:=matchPath, UpdateLinks:=0, ReadOnly:=True)
+        openedHere = True
+    End If
+    On Error Resume Next
+    Set ws = src.Worksheets("命令簿の保存")
+    Set lo = src.Worksheets("超過勤務").ListObjects("転記_月計")
+    On Error GoTo 0
+    If ws Is Nothing Or lo Is Nothing Then
+        MsgBox "出勤・休暇管理データ に「命令簿の保存」シートか、超過勤務シートの表がありません（新しい 出勤・休暇管理データ にしてください）。", vbExclamation
+    Else
+        last = ws.Cells(ws.Rows.Count, 2).End(xlUp).row
+        For r = 6 To last      ' 下の行ほど新しい記録
+            If CStr(ws.Cells(r, 2).Value) <> "" Then pdfs(NormId(CStr(ws.Cells(r, 3).Value)) & "|" & YmKey(ws.Cells(r, 2).Value)) = CStr(ws.Cells(r, 7).Value)
+        Next r
+        If Not lo.DataBodyRange Is Nothing Then
+            For r = 1 To lo.ListRows.Count
+                moved(NormId(CStr(lo.ListColumns("出勤用ID").DataBodyRange.Cells(r).Value)) & "|" & _
+                      YmKey(lo.ListColumns("年月").DataBodyRange.Cells(r).Value)) = True
+            Next r
+        End If
+        ReadOvertimeRecords = True
+    End If
+    If openedHere Then src.Close SaveChanges:=False
+End Function
+
+' 年月の値（"2026-11" の文字、または日付になったもの）→ "2026-11"
+Private Function YmKey(v As Variant) As String
+    If VarType(v) = vbDate Or (IsNumeric(v) And CStr(v) <> "") Then
+        YmKey = Format(CDate(v), "yyyy-mm")
+    Else
+        YmKey = Trim$(CStr(v))
+    End If
+End Function
+
+' 申請・報告シート1つから、外せる古い月のシートを外す。結果の文を返す（外した枚数を total に足す）
+Private Function RemoveOldOne(path As String, id As String, cutoff As Date, pdfs As Object, moved As Object, total As Long) As String
+    On Error GoTo Failed
+    Dim wb As Workbook, s As Worksheet, ym As Date, k As String, removed As String, kept As String, n As Long
+    Dim targets As New Collection, item As Variant, nxt As Worksheet
+    Set wb = Workbooks.Open(Filename:=path, UpdateLinks:=0)
+    For Each s In wb.Worksheets
+        ym = OvertimeMonth(s.Name)
+        If ym > 0 And ym < cutoff Then
+            k = NormId(id) & "|" & Format(ym, "yyyy-mm")
+            If Not IsNumeric(s.Range("AC69").Value2) Or CStr(s.Range("AC69").Value2) = "" Then
+                kept = kept & "、" & Mid$(s.Name, 4) & "（確認待ち）"
+            ElseIf Not moved.Exists(k) Then
+                kept = kept & "、" & Mid$(s.Name, 4) & "（転記していない）"
+            ElseIf Not pdfs.Exists(k) Then
+                kept = kept & "、" & Mid$(s.Name, 4) & "（PDF がない）"
+            ElseIf CStr(pdfs(k)) <> SheetHash(s) Then
+                kept = kept & "、" & Mid$(s.Name, 4) & "（PDF のあとで直されている）"
+            Else
+                targets.Add s.Name
+            End If
+        End If
+    Next s
+    For Each item In targets     ' シートは月の順に並んでいる
+        ' 翌月のシートの BH1（この月の最終日の退庁時刻を指す式）を値にしてから外す
+        Set nxt = SheetByName(wb, OvertimeSheetName(DateAdd("m", 1, OvertimeMonth(CStr(item)))))
+        If Not nxt Is Nothing Then
+            If nxt.Range("BH1").HasFormula Then
+                nxt.Unprotect
+                nxt.Range("BH1").Value = nxt.Range("BH1").Value
+                ProtectOvertime nxt
+            End If
+        End If
+        wb.Worksheets(CStr(item)).Delete
+        removed = removed & "、" & Mid$(CStr(item), 4)
+        n = n + 1
+    Next item
+    If n > 0 Then wb.Close SaveChanges:=True Else wb.Close SaveChanges:=False
+    total = total + n
+    If n > 0 Then RemoveOldOne = "外しました：" & Mid$(removed, 2) Else RemoveOldOne = "外す月はありません"
+    If kept <> "" Then RemoveOldOne = RemoveOldOne & "／残した月：" & Mid$(kept, 2)
+    Exit Function
+Failed:
+    RemoveOldOne = "外せませんでした：" & Err.Description
+    On Error Resume Next
+    If Not wb Is Nothing Then wb.Close SaveChanges:=False
+End Function
+
+' 月のシートの内容（A1:AF72 の値）から作る短い文字（出勤・休暇管理データのマクロの SheetHash と同じ計算。PDF のあとで直されたかを見る）
+Private Function SheetHash(ws As Worksheet) As String
+    Dim v As Variant, r As Long, c As Long, s As String, j As Long, ch As Long
+    Dim h1 As Double, h2 As Double
+    Const P As Double = 2147483647#
+    v = ws.Range("A1:AF72").Value2
+    For r = 1 To UBound(v, 1)
+        For c = 1 To UBound(v, 2)
+            If IsError(v(r, c)) Then s = "#" Else s = CStr(v(r, c))
+            s = s & Chr$(31)
+            For j = 1 To Len(s)
+                ch = AscW(Mid$(s, j, 1)) And &HFFFF&
+                h1 = h1 * 31# + ch: h1 = h1 - Int(h1 / P) * P
+                h2 = h2 * 131# + ch: h2 = h2 - Int(h2 / P) * P
+            Next j
+        Next c
+    Next r
+    SheetHash = Right$("0000000" & Hex$(CLng(h1)), 8) & Right$("0000000" & Hex$(CLng(h2)), 8)
+End Function
+
 Private Sub ProtectOvertime(ws As Worksheet)
     ' 書式（行の高さ・列の幅）の変更はできる。add_overtime_sheet.ps1 と同じ設定
     ws.Protect DrawingObjects:=True, Contents:=True, Scenarios:=False, _
                AllowFormattingCells:=True, AllowFormattingColumns:=True, AllowFormattingRows:=True
+End Sub
+
+' 超過勤務の月のシートと超勤ひな形の BH2（その月の最終日の退庁時刻。翌月の BH1 が指す）の式を、新しい式にする。
+' 2026-11-19 までのひな形は、空欄の日を "" にしていたので、翌月の1日の欄が #VALUE! になった
+Private Sub FixOvertimeBh2(wb As Workbook)
+    Dim s As Worksheet, f As String
+    f = "=IF($W$1="""",0,N(INDEX($L$5:$L$66,2*DAY(EOMONTH($W$1,0))-1)))"     ' tools/overtime/add_overtime_sheet.ps1 と同じ式
+    For Each s In wb.Worksheets
+        If OvertimeMonth(s.Name) > 0 Or s.Name = OT_TEMPLATE Then
+            If s.Range("BH2").Formula <> f Then
+                s.Unprotect
+                s.Range("BH2").Formula = f
+                ProtectOvertime s
+            End If
+        End If
+    Next s
 End Sub
 
 ' 超過勤務のシートで、確認日（AC69）が入っている月の所属長氏名（AC70 の式）を値にする
@@ -238,7 +429,7 @@ Private Function TableByName(wb As Workbook, nm As String) As ListObject
     Err.Raise vbObjectError + 3, , "表「" & nm & "」が見つかりません"
 End Function
 
-' ［申告・割振り簿を見る］：B9 の出勤用ID の人の休暇申請シートを読み取り専用で開き、管理者だけが見る「申告・割振り簿」を表示する。
+' ［申告・割振り簿を見る］：B9 の出勤用ID の人の申請・報告シートを読み取り専用で開き、管理者だけが見る「申告・割振り簿」を表示する。
 ' 開いたファイルは保存しないで閉じる（読み取り専用なので、元のファイルは変わらない。本人・所属長には見えないまま）
 Public Sub ShowFlexBook()
     Dim cfg As Worksheet, outDir As String, id As String, f As String, found As String, wb As Workbook, ws As Worksheet
@@ -248,19 +439,19 @@ Public Sub ShowFlexBook()
     If outDir = "" Or Dir(outDir, vbDirectory) = "" Then MsgBox "作成先のフォルダが見つかりません（B5）。", vbExclamation: Exit Sub
     If id = "" Then MsgBox "見る人の出勤用ID を B9 に入れてください。", vbExclamation: Exit Sub
     If Right$(outDir, 1) <> "\" Then outDir = outDir & "\"
-    f = Dir(outDir & "休暇申請*.xlsx")
+    f = Dir(outDir & "*.xlsx")     ' 申請・報告シート（今の名前）と 休暇申請シート・休暇申請_（前の名前）を IsSheetFile で選ぶ
     Do While f <> ""
         If IsSheetFile(f) Then
             If NormId(NameParts(f)(1)) = NormId(id) Then found = f
         End If
         f = Dir()
     Loop
-    If found = "" Then MsgBox "出勤用ID " & id & " の休暇申請シートが作成先にありません。", vbExclamation: Exit Sub
+    If found = "" Then MsgBox "出勤用ID " & id & " の申請・報告シートが作成先にありません。", vbExclamation: Exit Sub
     Set wb = Workbooks.Open(Filename:=outDir & found, UpdateLinks:=0, ReadOnly:=True)
     Set ws = SheetByName(wb, FLEX_BOOK)
     If ws Is Nothing Then
         wb.Close SaveChanges:=False
-        MsgBox "この休暇申請シートには「" & FLEX_BOOK & "」がありません（様式が古いので、［様式を移行］をしてください）。", vbExclamation
+        MsgBox "この申請・報告シートには「" & FLEX_BOOK & "」がありません（様式が古いので、［様式を移行］をしてください）。", vbExclamation
         Exit Sub
     End If
     ws.Visible = xlSheetVisible
@@ -470,7 +661,7 @@ Private Function WriteFlexInputs(wb As Workbook, items As Collection) As Long
     Next item
 End Function
 
-' 様式の古い休暇申請シートを新しい様式にする。元のファイルは控えのフォルダに複製してから、同じファイルに上書きする
+' 様式の古い申請・報告シートを新しい様式にする。元のファイルは控えのフォルダに複製してから、同じファイルに上書きする
 ' （別のファイルに置き換えると OneDrive の共有リンクが切れるため）。quiet が True のときはメッセージを出さない
 Public Sub MigrateAll(ByVal quiet As Boolean)
     Dim cfg As Worksheet, res As Worksheet
@@ -497,8 +688,8 @@ Public Sub MigrateAll(ByVal quiet As Boolean)
         Exit Sub
     End If
     If Not quiet Then
-        If MsgBox("様式の古い休暇申請シートを、新しいひな形の様式にします。" & vbCrLf & _
-                  "職員や所属長が休暇申請シートを開いていない時間に実行してください。" & vbCrLf & _
+        If MsgBox("様式の古い申請・報告シートを、新しいひな形の様式にします。" & vbCrLf & _
+                  "職員や所属長が申請・報告シートを開いていない時間に実行してください。" & vbCrLf & _
                   "元のファイルは作成先の中の控えのフォルダに残します。" & vbCrLf & vbCrLf & _
                   "実行しますか？", vbYesNo + vbQuestion) <> vbYes Then Exit Sub
     End If
@@ -510,7 +701,7 @@ Public Sub MigrateAll(ByVal quiet As Boolean)
 
     ' 先にファイルの名前を集める（処理の途中で Dir の続きが使えなくなるため）
     Dim names As New Collection, f As String, item As Variant
-    f = Dir(outDir & "休暇申請*.xlsx")
+    f = Dir(outDir & "*.xlsx")     ' 申請・報告シート（今の名前）と 休暇申請シート・休暇申請_（前の名前）を IsSheetFile で選ぶ
     Do While f <> ""
         If IsSheetFile(f) Then names.Add f
         f = Dir()
@@ -549,7 +740,7 @@ Public Sub MigrateAll(ByVal quiet As Boolean)
     If Not quiet Then MsgBox "移行 " & done & " 件、そのほか " & other & " 件です（結果シートを確かめてください）。", vbInformation
 End Sub
 
-' 休暇申請シート1つを移行する。結果の文を返す
+' 申請・報告シート1つを移行する。結果の文を返す
 Private Function MigrateOne(path As String, fileName As String, tplPath As String, backupDir As String, _
                             id As String, nm As String, yr As Long) As String
     ' 本人・所属長が書く列（日数と時間は自動）
@@ -663,17 +854,17 @@ Failed:
     RenameFile = False
 End Function
 
-' 個人別のファイル名：休暇申請シート　出勤用ID　氏名.xlsx
+' 個人別のファイル名：申請・報告シート　出勤用ID　氏名.xlsx
 Private Function StandardName(id As String, nm As String) As String
-    StandardName = "休暇申請シート　" & SafeName(id) & "　" & SafeName(nm) & ".xlsx"
+    StandardName = "申請・報告シート　" & SafeName(id) & "　" & SafeName(nm) & ".xlsx"
 End Function
 
-' 個人別の休暇申請シートのファイルか（ひな形は違う）。区切りは全角スペース（半角スペース・「_」、前の名前の 休暇申請_ でも可）
+' 個人別の申請・報告シートのファイルか（ひな形は違う）。区切りは全角スペース（半角スペース・「_」も可）。前の名前（休暇申請シート　…、休暇申請_…）も選ぶ
 Private Function IsSheetFile(f As String) As Boolean
-    IsSheetFile = (f Like "休暇申請シート[　 _]*.xlsx") Or (f Like "休暇申請_*.xlsx")
+    IsSheetFile = (f Like "申請・報告シート[　 _]*.xlsx") Or (f Like "休暇申請シート[　 _]*.xlsx") Or (f Like "休暇申請_*.xlsx")
 End Function
 
-' ファイル名を 休暇申請シート / 出勤用ID / 氏名 に分ける
+' ファイル名を 申請・報告シート / 出勤用ID / 氏名 に分ける
 Private Function NameParts(f As String) As String()
     Dim s As String
     s = Replace(Replace(Left$(f, Len(f) - 5), "_", "　"), " ", "　")
@@ -728,10 +919,10 @@ Public Sub RunAll(ByVal create As Boolean, ByVal quiet As Boolean)
     ReadMatching matchPath
     formVersion = ReadFormVersion(tplPath)
 
-    ' 作成先にある休暇申請シート（出勤用ID → ファイル名）。出勤用ID はファイル名の2つ目の部分
+    ' 作成先にある申請・報告シート（出勤用ID → ファイル名）。出勤用ID はファイル名の2つ目の部分
     Dim existing As Object, f As String
     Set existing = CreateObject("Scripting.Dictionary")
-    f = Dir(outDir & "休暇申請*.xlsx")
+    f = Dir(outDir & "*.xlsx")     ' 申請・報告シート（今の名前）と 休暇申請シート・休暇申請_（前の名前）を IsSheetFile で選ぶ
     Do While f <> ""
         If IsSheetFile(f) Then existing(NormId(NameParts(f)(1))) = f
         f = Dir()
@@ -762,7 +953,7 @@ Public Sub RunAll(ByVal create As Boolean, ByVal quiet As Boolean)
         Dim k As Variant, parts() As String
         For Each k In existing.Keys
             fileName = existing(k)
-            parts = NameParts(fileName)     ' 休暇申請シート / 出勤用ID / 氏名
+            parts = NameParts(fileName)     ' 申請・報告シート / 出勤用ID / 氏名
             id = parts(1)
             nm = ""
             If UBound(parts) >= 2 Then nm = parts(2)
@@ -779,7 +970,7 @@ Public Sub RunAll(ByVal create As Boolean, ByVal quiet As Boolean)
     If quiet Then Exit Sub
     If create Then
         MsgBox "作成 " & done & " 件、すでにあったもの " & other & " 件です。" & vbCrLf & _
-               "次に、作った休暇申請シートを OneDrive で本人と所属長に共有してください。", vbInformation
+               "次に、作った申請・報告シートを OneDrive で本人と所属長に共有してください。", vbInformation
     Else
         MsgBox "更新 " & done & " 件、更新できなかったもの " & other & " 件です（結果シートを確かめてください）。", vbInformation
     End If
@@ -806,8 +997,8 @@ Private Sub ReadMatching(matchPath As String)
         Set src = Workbooks.Open(Filename:=matchPath, UpdateLinks:=0, ReadOnly:=True)
         openedHere = True
     End If
-    staff = src.Worksheets("職員名簿").Range("A2:N" & STAFF_LAST).Value2     ' L・M は養育する子の数・要介護者の数、N は所属長氏名
-    ' （E・F は休憩の始め・終わり）     ' E・F は休憩の始め・終わり（短縮の特例の人だけ）
+    staff = src.Worksheets("職員名簿").Range("A2:L" & STAFF_LAST).Value2     ' C・D は休憩の始め・終わり、J・K は養育する子の数・要介護者の数、L は所属長氏名
+    ' C・D は休憩の始め・終わり（短縮の特例の人だけ）
     keys = src.Worksheets("計算用").Range("H2:H" & LEAVE_LAST).Value
     totals = src.Worksheets("計算用").Range("K2:K" & LEAVE_LAST).Value
     adjust = src.Worksheets("休暇等").Range("H2:I" & LEAVE_LAST).Value     ' B 列は氏名（自動）
@@ -827,7 +1018,7 @@ Failed:
     CreateOne = "作れませんでした：" & Err.Description
 End Function
 
-' 休暇申請シートを開いて「管理」シートに書き込む。結果の文を返す
+' 申請・報告シートを開いて「管理」シートに書き込む。結果の文を返す
 Private Function UpdateOne(path As String, id As String, nm As String, yr As Long) As String
     On Error GoTo Failed
     Dim pos As Long, hold As Variant, adj As Variant, carry As Variant, grant As Variant, wb As Workbook, ws As Worksheet
@@ -857,12 +1048,12 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     For k = 1 To UBound(staff, 1)
         If NormId(CStr(staff(k, 1))) = NormId(id) Then
             ' 養育する子の数・要介護者の数（看護休暇・短期介護の上限に使う。空欄は空欄のまま）
-            If CStr(staff(k, 12)) <> "" And IsNumeric(staff(k, 12)) Then children = CLng(staff(k, 12))
-            If CStr(staff(k, 13)) <> "" And IsNumeric(staff(k, 13)) Then carees = CLng(staff(k, 13))
-            If Not IsError(staff(k, 14)) Then boss = Trim$(CStr(staff(k, 14)))
-            If IsNumeric(staff(k, 5)) And IsNumeric(staff(k, 6)) And CStr(staff(k, 5)) <> "" And CStr(staff(k, 6)) <> "" Then
-                breakStart = staff(k, 5)
-                breakEnd = staff(k, 6)
+            If CStr(staff(k, 10)) <> "" And IsNumeric(staff(k, 10)) Then children = CLng(staff(k, 10))
+            If CStr(staff(k, 11)) <> "" And IsNumeric(staff(k, 11)) Then carees = CLng(staff(k, 11))
+            If Not IsError(staff(k, 12)) Then boss = Trim$(CStr(staff(k, 12)))
+            If IsNumeric(staff(k, 3)) And IsNumeric(staff(k, 4)) And CStr(staff(k, 3)) <> "" And CStr(staff(k, 4)) <> "" Then
+                breakStart = staff(k, 3)
+                breakEnd = staff(k, 4)
             End If
             Exit For
         End If
@@ -871,12 +1062,13 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     ws.Range("B14").Value = carees
     ' 所属長氏名：超過勤務のシートの確認欄（AC70）が引く。変わる前に、確認日のある月の氏名を値にして残す（異動しても前の所属長の名前のまま）
     If CStr(ws.Range("B15").Value) <> boss Then FreezeBossNames wb
+    FixOvertimeBh2 wb
     ws.Range("B15").Value = boss
     ws.Range("B9").Value = breakStart
     ws.Range("B10").Value = breakEnd
     ws.Range("B7").Value = carry
     ws.Range("B8").Value = grant
-    ' 祝日（日付だけを書く。文字があると休暇申請シートの日数の計算がエラーになるため）
+    ' 祝日（日付だけを書く。文字があると申請・報告シートの日数の計算がエラーになるため）
     Dim i As Long, n As Long
     ws.Range("D1:D200").ClearContents
     For i = 1 To UBound(holidays, 1)

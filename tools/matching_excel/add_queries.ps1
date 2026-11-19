@@ -1,13 +1,13 @@
-﻿# 出勤・休暇管理データ に Power Query を入れる：休暇申請シート（tools/leave_sheet）のフォルダ・テレワーク予定表などを読み、
-# 「休暇申請シートの読み込み」シートに 年休_自動・月別_自動・日別_自動 の表を、「申請一覧」シートに申請一覧の表を作る。開いたときに読み直す設定にする。
-# 使い方：add_queries.ps1 -Path 出勤・休暇管理データ.xlsx [-Folder 休暇申請シートのフォルダ]
+﻿# 出勤・休暇管理データ に Power Query を入れる：申請・報告シート（tools/leave_sheet）のフォルダ・テレワーク予定表などを読み、
+# 「申請・報告シートの読み込み」シートに 年休_自動・月別_自動・日別_自動 の表を、「申請一覧」シートに申請一覧の表を作る。開いたときに読み直す設定にする。
+# 使い方：add_queries.ps1 -Path 出勤・休暇管理データ.xlsx [-Folder 申請・報告シートのフォルダ]
 #   -Folder などを付けると、それを読んだ状態で保存する（確認用）。付けなければ設定欄は空欄のまま。
 #   -TeleworkFolder はテレワーク予定表（tools/telework）のフォルダ。テレワーク一覧シートと、出勤簿の「テレ」に使う。
 param([Parameter(Mandatory = $true)][string]$Path, [string]$Folder = '', [string]$TeleworkFolder = '')
 
 $ErrorActionPreference = 'Stop'
 $Path = [IO.Path]::GetFullPath($Path)
-$sheetQueries = Join-Path $PSScriptRoot '..\leave_sheet\queries'   # 休暇申請シートを読むクエリは休暇集計と同じもの
+$sheetQueries = Join-Path $PSScriptRoot '..\leave_sheet\queries'   # 申請・報告シートを読むクエリは休暇集計と同じもの
 $teleworkQueries = Join-Path $PSScriptRoot '..\telework\queries'    # テレワーク予定表を読むクエリ
 $queries = Join-Path $PSScriptRoot 'queries'
 # 接続のみのクエリ（ほかのクエリから使う）。名前 → ファイル
@@ -27,24 +27,24 @@ $otBuckets = @('125', '150', '150（60H前）', '150（+25）', '150（+15）', 
 $otAllowance = @('125', '150', '135', '160', '175', '休日勤務135') | ForEach-Object { "手当対象 $_" }
 # シートに出す表：シート・置く場所（見出しの行）・行数を書くセル・時間:分／日付の書式を付ける列
 $loaded = [ordered]@{
-    '年休_自動' = @{ Sheet = '休暇申請シートの読み込み'; At = 'A8'; Count = 'A6'; Time = @(); Date = @() }
-    '月別_自動' = @{ Sheet = '休暇申請シートの読み込み'; At = 'E8'; Count = 'E6'; Time = (1..12 | ForEach-Object { "${_}月" }); Date = @() }
-    '日別_自動' = @{ Sheet = '休暇申請シートの読み込み'; At = 'S8'; Count = 'S6'; Time = @(); Date = @() }
+    '年休_自動' = @{ Sheet = '申請・報告シートの読み込み'; At = 'A8'; Count = 'A6'; Time = @(); Date = @() }
+    '月別_自動' = @{ Sheet = '申請・報告シートの読み込み'; At = 'E8'; Count = 'E6'; Time = (1..12 | ForEach-Object { "${_}月" }); Date = @() }
+    '日別_自動' = @{ Sheet = '申請・報告シートの読み込み'; At = 'S8'; Count = 'S6'; Time = @(); Date = @() }
     '申請一覧'  = @{ Sheet = '申請一覧'; At = 'A3'; Count = ''; Time = @('時間'); Date = @('申請日', '開始日', '終了日', '承認日') }
     # テレワーク：一覧は注意の確認用、日別は出勤簿の出勤欄・備考用（一覧を参照するので一覧の後に作る）
     'テレワーク一覧'  = @{ Sheet = 'テレワーク一覧'; At = 'A5'; Count = ''; Time = @('開始時刻', '終了時刻', '時間'); Date = @('日付') }
-    'テレワーク_日別' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AD8'; Count = 'AD6'; Time = @(); Date = @() }
-    # 超過勤務等命令簿（休暇申請シートの月のシート）：1人1か月の計と確認、日ごとの行
+    'テレワーク_日別' = @{ Sheet = '申請・報告シートの読み込み'; At = 'AD8'; Count = 'AD6'; Time = @(); Date = @() }
+    # 超過勤務等命令簿（申請・報告シートの月のシート）：1人1か月の計と確認、日ごとの行
     '超勤_月'   = @{ Sheet = '超過勤務の読み込み'; At = 'A3'; Count = ''; Time = ($otBuckets + $otAllowance + @('60時間超（+25）', '60時間超（+15）')); Date = @('確認日') }
     '超勤_日別' = @{ Sheet = '超過勤務の読み込み'; At = 'AG3'; Count = ''; Time = (@('登庁時刻', '退庁時刻', '休憩時間') + $otBuckets); Date = @('確認日', '日付') }
-    # フレックスタイム制（休暇申請シートのフレックス申告・割振り）：今の内容（日ごと）、単位期間ごとの状況と取り込み、出勤簿の備考
+    # フレックスタイム制（申請・報告シートのフレックス申告・割振り）：今の内容（日ごと）、単位期間ごとの状況と取り込み、出勤簿の備考
     'フレックス_日別' = @{ Sheet = 'フレックスの読み込み'; At = 'A3'; Count = ''; Time = @('勤務開始', '勤務終了', '休憩', '勤務時間'); Date = @('期間の開始日', '日付', '申告年月日', '割振年月日') }
     'フレックス一覧'  = @{ Sheet = 'フレックス'; At = 'A3'; Count = ''; Time = @('合計'); Date = @('開始日', '終了日', '申告年月日', '割振年月日') }
-    'フレックス_出勤簿' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AH8'; Count = 'AH6'; Time = @(); Date = @() }
+    'フレックス_出勤簿' = @{ Sheet = '申請・報告シートの読み込み'; At = 'AH8'; Count = 'AH6'; Time = @(); Date = @() }
     # 利用予定シート（フレックス／テレワーク利用予定）の日ごとの文字：休暇・テレワーク・フレックスの勤務開始
-    # テレワーク実施報告（休暇申請シートのテレワーク報告）：全員の報告と所属長の確認・注意
+    # テレワーク実施報告（申請・報告シートのテレワーク報告）：全員の報告と所属長の確認・注意
     'テレワーク報告一覧' = @{ Sheet = 'テレワーク報告'; At = 'A3'; Count = ''; Time = @('開始時刻', '終了時刻', '時間'); Date = @('提出日', '実施日', '確認日') }
-    '利用予定_日別' = @{ Sheet = '休暇申請シートの読み込み'; At = 'AK8'; Count = 'AK6'; Time = @(); Date = @() }
+    '利用予定_日別' = @{ Sheet = '申請・報告シートの読み込み'; At = 'AK8'; Count = 'AK6'; Time = @(); Date = @() }
     # 出勤管理システムの［Excel出力］のファイル（フォルダで読む）と、つないだ出勤記録（マクロが出力データ貼付に写す）
     'QR出勤ファイル一覧' = @{ Sheet = 'QR出勤の読み込み'; At = 'A5'; Count = ''; Time = @(); Date = @() }
     'QR出勤' = @{ Sheet = 'QR出勤の読み込み'; At = 'G5'; Count = ''; Time = @(); Date = @() }
@@ -64,7 +64,7 @@ try {
     foreach ($name in $loaded.Keys) {
         [void]$wb.Queries.Add($name, [IO.File]::ReadAllText((Join-Path $queries "$name.pq"), [Text.Encoding]::UTF8))
     }
-    $cfg = $wb.Worksheets.Item('休暇申請シートの読み込み')
+    $cfg = $wb.Worksheets.Item('申請・報告シートの読み込み')
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = $settings[$k] } }
     $tw = $wb.Worksheets.Item('テレワーク一覧')
     if ($TeleworkFolder) { $tw.Range('B2').Value2 = $TeleworkFolder }
@@ -116,7 +116,7 @@ try {
         }
     }
     # ----- ［超過勤務を転記］で写す先の表（値。照合の列だけは式）。見出しは読み込んだ表と同じ＋転記日時 -----
-    $au = "'休暇申請シートの読み込み'"
+    $au = "'申請・報告シートの読み込み'"
     $match = { param($key, $col) "IFERROR(MATCH($key,INDEX($au!`$${col}:`$${col},9):INDEX($au!`$${col}:`$${col},8+MAX(1,$au!`$${col}`$6)),0)+8,"""")" }
     $dayKey = '[@出勤用ID]&"|"&TEXT([@日付],"yyyy-mm-dd")'
     $qr = 'COUNTIFS(照合結果!$G$2:$G$5001,[@出勤用ID]&"",照合結果!$H$2:$H$5001,TEXT([@日付],"yyyy-mm-dd"))'

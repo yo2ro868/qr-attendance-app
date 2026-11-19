@@ -2,11 +2,11 @@
 
 使い方: python make_package.py [出力先フォルダ]
 出力先を省略するとプロジェクト直下に 休暇申請一式（フォルダ）と 休暇申請一式.zip を作る（同じ名前は作り直し）。
-中身：手順書.html（休暇・フレックス・テレワーク・超過勤務をまとめた、目次つきの1つの手順書。管理者向け）、手順書（申請者向け）.html・手順書（所属長向け）.html（配る用）、休暇申請シート（ひな形）.xlsx、
-      休暇申請シートの作成.xlsm と 休暇申請シートの作成.bas（職員分の休暇申請シートを作るマクロ）、休暇集計.xlsx（申請一覧）、
+中身：手順書.html（休暇・フレックス・テレワーク・超過勤務をまとめた、目次つきの1つの手順書。管理者向け）、手順書（申請者向け）.html・手順書（所属長向け）.html（配る用）、申請・報告シート（ひな形）.xlsx、
+      申請・報告シートの作成.xlsm と 申請・報告シートの作成.bas（職員分の申請・報告シートを作るマクロ）、休暇集計.xlsx（申請一覧）、
       出勤・休暇管理データ.xlsm と 出勤・休暇管理データのマクロ.bas、テレワーク予定表（ひな形）.xlsx（tools/telework）
 どの Excel のファイルも、最後に scrub_personal.py で作成者・最終更新者を消す（このPCの利用者の名前が入らないように）。
-休暇申請シートのひな形には、プロジェクト直下の 超過勤務等命令簿（原本）.xlsx（いま使っている命令簿。Git には入れない）の
+申請・報告シートのひな形には、プロジェクト直下の 超過勤務等命令簿（原本）.xlsx（いま使っている命令簿。Git には入れない）の
 いちばん新しい月のシートを「超勤ひな形」として入れる（tools/overtime/add_overtime_sheet.ps1）。
 また、プロジェクト直下の 申告・割振り簿（原本）.xlsx（総務課の様式。シートの保護を外したもの。Git には入れない）を写して、
 様式どおりの完成版のシート「申告・割振り簿」を入れる（tools/flex/add_flex_book.ps1）。
@@ -39,18 +39,18 @@ def ps(script, *args):
 shutil.copy(HERE / "手順書.html", OUT / "手順書.html")
 for name in ("手順書（申請者向け）.html", "手順書（所属長向け）.html"):     # 職員・所属長に配る手順書
     shutil.copy(HERE / name, OUT / name)
-# 休暇申請シートのひな形。式が多く Excel の再計算中に呼び出しを断られる（RPC_E_CALL_REJECTED）ことがあるので、失敗したら作り直す（3回まで）
+# 申請・報告シートのひな形。式が多く Excel の再計算中に呼び出しを断られる（RPC_E_CALL_REJECTED）ことがあるので、失敗したら作り直す（3回まで）
 for attempt in range(1, 4):
     try:
-        subprocess.run([sys.executable, str(HERE / "make_form.py"), str(OUT / "休暇申請シート（ひな形）.xlsx")], check=True)
-        ps(HERE.parent / "overtime" / "add_overtime_sheet.ps1", "-Template", str(OUT / "休暇申請シート（ひな形）.xlsx"), "-Source", str(OT_SOURCE))
-        ps(HERE.parent / "flex" / "add_flex_book.ps1", "-Template", str(OUT / "休暇申請シート（ひな形）.xlsx"), "-Source", str(FLEX_SOURCE))
+        subprocess.run([sys.executable, str(HERE / "make_form.py"), str(OUT / "申請・報告シート（ひな形）.xlsx")], check=True)
+        ps(HERE.parent / "overtime" / "add_overtime_sheet.ps1", "-Template", str(OUT / "申請・報告シート（ひな形）.xlsx"), "-Source", str(OT_SOURCE))
+        ps(HERE.parent / "flex" / "add_flex_book.ps1", "-Template", str(OUT / "申請・報告シート（ひな形）.xlsx"), "-Source", str(FLEX_SOURCE))
         break
     except subprocess.CalledProcessError:
         if attempt == 3:
             raise
         print(f"ひな形の作成に失敗しました。作り直します（{attempt + 1}回目）")
-ps(HERE / "build_macro.ps1", "-Out", str(OUT / "休暇申請シートの作成.xlsm"))
+ps(HERE / "build_macro.ps1", "-Out", str(OUT / "申請・報告シートの作成.xlsm"))
 ps(HERE / "build_summary.ps1", "-Out", str(OUT / "休暇集計.xlsx"))
 ps(HERE.parent / "matching_excel" / "build.ps1", "-Out", str(OUT / "出勤・休暇管理データ.xlsm"))
 TELEWORK = HERE.parent / "telework"

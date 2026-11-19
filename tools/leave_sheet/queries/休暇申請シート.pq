@@ -1,5 +1,5 @@
-// 「フォルダ」にある 休暇申請シート　出勤用ID　氏名.xlsx を1ファイル1行で読む（接続のみ）。
-// 出勤用ID と氏名はファイル名から取る（休暇申請シートには見せる欄がないため）。
+// 「フォルダ」にある 申請・報告シート　出勤用ID　氏名.xlsx を1ファイル1行で読む（接続のみ）。
+// 出勤用ID と氏名はファイル名から取る（申請・報告シートには見せる欄がないため）。
 // 列：ファイル名・出勤用ID・氏名・申請（その人の申請の表）・超勤（超過勤務等命令簿の月のシートの表「超勤日別」をつないだもの。なければ null）・
 //     フレックス日・フレックス期間（フレックスタイム制のシートの表「フレックス日別」「フレックス期間」。なければ null）・
 //     テレワーク報告（テレワーク実施報告の表「テレワーク報告」と、その人の所属。なければ null）・読み取り
@@ -18,7 +18,7 @@ let
         フレックス日 = nullable table, フレックス期間 = nullable table, テレワーク報告 = nullable table, 報告の所属 = text, 読み取り = text], {}),
     // 区切りは全角スペース。半角スペースや「_」、前の名前（休暇申請_1234_山田太郎.xlsx）でも読む
     区切りをそろえる = (名前 as text) => Text.Replace(Text.Replace(名前, "_", "　"), " ", "　"),
-    // 休暇申請シート　1234　山田太郎.xlsx → {"1234", "山田太郎"}
+    // 申請・報告シート　1234　山田太郎.xlsx → {"1234", "山田太郎"}
     名前の部分 = (名前 as text) =>
         let 部分 = List.Select(Text.Split(区切りをそろえる(Text.BeforeDelimiter(名前, ".", {0, RelativePosition.FromEnd})), "　"), each _ <> "")
         in {if List.Count(部分) > 1 then 部分{1} else "", if List.Count(部分) > 2 then 部分{2} else ""},
@@ -40,17 +40,17 @@ let
             [ファイル名 = 名前, 出勤用ID = 部分{0}, 氏名 = 部分{1}, 申請 = 申請, 超勤 = 超勤,
              フレックス日 = 表("フレックス日別"), フレックス期間 = 表("フレックス期間"), テレワーク報告 = 表("テレワーク報告"),
              報告の所属 = 所属(ブック),
-             読み取り = if 部分{0} = "" then "ファイル名から出勤用ID が読めません（休暇申請シート　出勤用ID　氏名.xlsx にしてください）" else "OK"],
+             読み取り = if 部分{0} = "" then "ファイル名から出勤用ID が読めません（申請・報告シート　出勤用ID　氏名.xlsx にしてください）" else "OK"],
     ファイル = 読み取り結果[ファイル],
     // フォルダの直下だけを読む（Folder.Files は下のフォルダも返すので、控えのフォルダのファイルを二重に数えないように）
     場所 = (p as text) => Text.Lower(Text.TrimEnd(p, "\")),
     対象 = if ファイル = null then null
-        else Table.SelectRows(ファイル, each (Text.StartsWith(区切りをそろえる([Name]), "休暇申請シート　") or Text.StartsWith(区切りをそろえる([Name]), "休暇申請　"))
+        else Table.SelectRows(ファイル, each (Text.StartsWith(区切りをそろえる([Name]), "申請・報告シート　") or Text.StartsWith(区切りをそろえる([Name]), "休暇申請シート　") or Text.StartsWith(区切りをそろえる([Name]), "休暇申請　"))
             and Text.Lower([Extension]) = ".xlsx"
             and 場所([Folder Path]) = 場所(フォルダ)),
     行 = if フォルダ <> "" and ファイル = null then
             {[ファイル名 = フォルダ, 出勤用ID = "", 氏名 = "", 申請 = #table({}, {}), 超勤 = null, フレックス日 = null, フレックス期間 = null, テレワーク報告 = null, 報告の所属 = "",
-              読み取り = "休暇申請シートのフォルダが見つかりません。場所を確かめてください"]}
+              読み取り = "申請・報告シートのフォルダが見つかりません。場所を確かめてください"]}
         else if 対象 = null then {}
         else List.Transform(Table.ToRecords(対象), (f) =>
             try 読む(f[Name], f[Content])
