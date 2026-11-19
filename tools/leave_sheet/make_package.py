@@ -2,9 +2,11 @@
 
 使い方: python make_package.py [出力先フォルダ]
 出力先を省略するとプロジェクト直下に 休暇申請一式（フォルダ）と 休暇申請一式.zip を作る（同じ名前は作り直し）。
-中身：手順書.html（休暇・フレックス・テレワーク・超過勤務をまとめた、目次つきの1つの手順書。管理者向け）、手順書（申請者向け）.html・手順書（所属長向け）.html（配る用）、申請・報告シート（ひな形）.xlsx、
+中身：手順書.html（休暇・フレックス・テレワーク・超過勤務をまとめた、目次つきの1つの手順書。管理者向け）、申請・報告シート（ひな形）.xlsx、
       申請・報告シートの作成.xlsm と 申請・報告シートの作成.bas（職員分の申請・報告シートを作るマクロ）、休暇集計.xlsx（申請一覧）、
-      出勤・休暇管理データ.xlsm と 出勤・休暇管理データのマクロ.bas、テレワーク予定表（ひな形）.xlsx（tools/telework）
+      出勤・休暇管理データ.xlsm と 出勤・休暇管理データのマクロ.bas、テレワーク予定表（ひな形）.xlsx（tools/telework）、
+      QRコード出勤管理 利用者マニュアル.docx（QR出勤管理アプリの職員向けの使い方。Git の外：プロジェクト直下か、前に作った一式のフォルダにあれば入れる）
+職員・所属長に配る手順書（申請者向け・所属長向け）は、別の文書（claude.ai の文書。Word・PDF に書き出して配る）が正本なので、一式には入れない。
 どの Excel のファイルも、最後に scrub_personal.py で作成者・最終更新者を消す（このPCの利用者の名前が入らないように）。
 申請・報告シートのひな形には、プロジェクト直下の 超過勤務等命令簿（原本）.xlsx（いま使っている命令簿。Git には入れない）の
 いちばん新しい月のシートを「超勤ひな形」として入れる（tools/overtime/add_overtime_sheet.ps1）。
@@ -27,6 +29,14 @@ if not OT_SOURCE.exists():
     sys.exit(f"超過勤務等命令簿の原本がありません：{OT_SOURCE}（いま使っている命令簿の Excel をこの名前で置いてください）")
 if not FLEX_SOURCE.exists():
     sys.exit(f"申告・割振り簿の原本がありません：{FLEX_SOURCE}（総務課の様式の Excel を、シートの保護を外してこの名前で置いてください）")
+# 一式に入れる Git の外の文書（プロジェクト直下か、前に作った一式のフォルダにあるもの）。作り直しで消えないように、先に読んでおく
+EXTRAS = ["QRコード出勤管理 利用者マニュアル.docx"]
+extras = {}
+for name in EXTRAS:
+    for src in (HERE.parents[1] / name, OUT / name, HERE.parents[1] / "休暇申請一式" / name):
+        if src.exists():
+            extras[name] = src.read_bytes()
+            break
 if OUT.exists():
     shutil.rmtree(OUT)
 OUT.mkdir(parents=True)
@@ -37,8 +47,8 @@ def ps(script, *args):
 
 
 shutil.copy(HERE / "手順書.html", OUT / "手順書.html")
-for name in ("手順書（申請者向け）.html", "手順書（所属長向け）.html"):     # 職員・所属長に配る手順書
-    shutil.copy(HERE / name, OUT / name)
+for name, data in extras.items():
+    (OUT / name).write_bytes(data)
 # 申請・報告シートのひな形。式が多く Excel の再計算中に呼び出しを断られる（RPC_E_CALL_REJECTED）ことがあるので、失敗したら作り直す（3回まで）
 for attempt in range(1, 4):
     try:
