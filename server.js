@@ -734,19 +734,28 @@ app.get('/admin', requireAdmin, requirePasswordChanged, (req, res) => {
 });
 
 // ===== 管理者：出勤状況一覧 =====
-app.get('/admin/attendance', requireAdmin, async (req, res) => {
-  const { start, end, location, code } = req.query;
-  let sql = `SELECT r.*, l.name as location_name FROM attendance_records r
-             JOIN qr_locations l ON r.qr_location_id = l.id WHERE 1=1`;
+// 出勤状況一覧とExcel出力で共通の絞り込み（期間・設置場所・出勤用ID）
+function attendanceFilter(q) {
+  const pick = v => (typeof v === 'string' ? v.trim() : '');
+  const f = { start: pick(q.start), end: pick(q.end), location: pick(q.location), code: pick(q.code) };
+  let where = '';
   const params = [];
-  let i = 1;
-  if (start)    { sql += ` AND r.attendance_date >= $${i++}`; params.push(start); }
-  if (end)      { sql += ` AND r.attendance_date <= $${i++}`; params.push(end); }
-  if (location) { sql += ` AND r.qr_location_id = $${i++}`; params.push(location); }
-  if (code)     { sql += ` AND r.attendance_code = $${i++}`; params.push(code); }
-  sql += ' ORDER BY r.registered_at DESC LIMIT 500';
+  if (f.start)    { params.push(f.start);    where += ` AND r.attendance_date >= $${params.length}`; }
+  if (f.end)      { params.push(f.end);      where += ` AND r.attendance_date <= $${params.length}`; }
+  if (f.location) { params.push(parseInt(f.location, 10) || 0); where += ` AND r.qr_location_id = $${params.length}`; }
+  if (f.code)     { params.push(f.code);     where += ` AND r.attendance_code = $${params.length}`; }
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  return { ...f, where, params, qs };
+}
 
-  const records = await query(sql, params);
+app.get('/admin/attendance', requireAdmin, async (req, res) => {
+  const f = attendanceFilter(req.query);
+  const { start, end, location, code } = f;
+  const sql = `SELECT r.*, l.name as location_name FROM attendance_records r
+             JOIN qr_locations l ON r.qr_location_id = l.id WHERE 1=1${f.where}
+             ORDER BY r.registered_at DESC LIMIT 500`;
+
+  const records = await query(sql, f.params);
   const locs = await query('SELECT * FROM qr_locations WHERE is_active = 1');
 
   const rows = records.map(r => `
@@ -783,7 +792,8 @@ app.get('/admin/attendance', requireAdmin, async (req, res) => {
         </table>
       </div>
       <p style="margin-top:16px;">
-        <a href="/admin/attendance/excel" class="btn btn-primary" style="display:inline-block; width:auto;">📊 Excel出力</a>
+        <a href="/admin/attendance/excel${f.qs ? '?' + escapeHtml(f.qs) : ''}" class="btn btn-primary" style="display:inline-block; width:auto;">📊 Excel出力</a>
+        <span style="font-size:0.85rem; color:#555; margin-left:8px;">${f.qs ? '絞り込んだ条件のデータを出力します（件数の上限なし）' : '全期間のデータを出力します'}</span>
       </p>
     </div>
   `, { role: 'admin' }));
@@ -791,10 +801,12 @@ app.get('/admin/attendance', requireAdmin, async (req, res) => {
 
 // ===== Excel出力 =====
 app.get('/admin/attendance/excel', requireAdmin, async (req, res) => {
+  const f = attendanceFilter(req.query);
   const records = await query(
     `SELECT r.*, l.name as location_name FROM attendance_records r
-     JOIN qr_locations l ON r.qr_location_id = l.id
-     ORDER BY r.attendance_date, r.attendance_time`
+     JOIN qr_locations l ON r.qr_location_id = l.id WHERE 1=1${f.where}
+     ORDER BY r.attendance_date, r.attendance_time`,
+    f.params
   );
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('出勤記録');
@@ -808,10 +820,14 @@ app.get('/admin/attendance/excel', requireAdmin, async (req, res) => {
   sheet.getRow(1).font = { bold: true };
   records.forEach(r => sheet.addRow(r));
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="attendance.xlsx"');
+  // ファイル名に期間を入れる（例 attendance_2026-11-01_2026-11-30.xlsx）。期間なしは今までどおり attendance.xlsx
+  const span = (f.start || f.end) ? `_${f.start || ''}_${f.end || ''}`.replace(/[^0-9_-]/g, '') : '';
+  res.setHeader('Content-Disposition', `attachment; filename="attendance${span}.xlsx"`);
   await workbook.xlsx.write(res);
   res.end();
-  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'EXCEL_EXPORT', null, req.ip);
+  const cond = [f.start || f.end ? `期間:${f.start || '最初'}〜${f.end || '最後'}` : '全期間',
+    f.location ? `場所ID:${f.location}` : '', f.code ? `出勤用ID:${f.code}` : ''].filter(Boolean).join(' ');
+  await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'EXCEL_EXPORT', `${cond} ${records.length}件`, req.ip);
 });
 
 // ===== 管理者：出勤詳細 =====
