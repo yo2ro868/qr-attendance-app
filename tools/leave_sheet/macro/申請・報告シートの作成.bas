@@ -1047,7 +1047,7 @@ Private Sub ReadMatching(matchPath As String)
         Set src = Workbooks.Open(Filename:=matchPath, UpdateLinks:=0, ReadOnly:=True)
         openedHere = True
     End If
-    staff = src.Worksheets("職員名簿").Range("A2:O" & STAFF_LAST).Value2     ' C・D は休憩の始め・終わり、J・K は養育する子の数・要介護者の数、L 所属長氏名、M 所属長の所属、N・O 勤務時間管理員の役職・氏名
+    staff = src.Worksheets("職員名簿").Range("A2:O" & STAFF_LAST).Value2     ' C・D は休憩の始め・終わり、J・K は養育する子の数・要介護者の数、L 所属長氏名、M 所属長の所属、N・O 勤務時間管理員の所属・氏名
     ' C・D は休憩の始め・終わり（短縮の特例の人だけ）
     keys = src.Worksheets("計算用").Range("H2:H" & LEAVE_LAST).Value
     totals = src.Worksheets("計算用").Range("K2:K" & LEAVE_LAST).Value
@@ -1092,7 +1092,7 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     ws.Range("B6").Value = Now
     ' 休憩時間：職員名簿に書いてあればそれ、なければ 12:00〜13:00
     Dim breakStart As Double, breakEnd As Double, k As Long, children As Variant, carees As Variant, boss As String, section As String
-    Dim bossSection As String, clerkTitle As String, clerkName As String
+    Dim bossSection As String, clerkSection As String, clerkName As String
     breakStart = 12 / 24
     breakEnd = 13 / 24
     children = Empty: carees = Empty
@@ -1103,7 +1103,7 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
             If CStr(staff(k, 11)) <> "" And IsNumeric(staff(k, 11)) Then carees = CLng(staff(k, 11))
             If Not IsError(staff(k, 12)) Then boss = Trim$(CStr(staff(k, 12)))
             If Not IsError(staff(k, 13)) Then bossSection = Trim$(CStr(staff(k, 13)))
-            If Not IsError(staff(k, 14)) Then clerkTitle = Trim$(CStr(staff(k, 14)))
+            If Not IsError(staff(k, 14)) Then clerkSection = Trim$(CStr(staff(k, 14)))
             If Not IsError(staff(k, 15)) Then clerkName = Trim$(CStr(staff(k, 15)))
             ' 所属：部・課（E・F。部が空欄なら課だけ）。フレックス（単位期間・承認）の所属の既定
             If Not IsError(staff(k, 5)) And Not IsError(staff(k, 6)) Then section = Trim$(Trim$(CStr(staff(k, 5))) & " " & Trim$(CStr(staff(k, 6))))
@@ -1123,7 +1123,7 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     ws.Range("B15").Value = boss
     ws.Range("B16").Value = section
     ws.Range("B17").Value = bossSection
-    ws.Range("B18").Value = clerkTitle
+    ws.Range("B18").Value = clerkSection
     ws.Range("B19").Value = clerkName
     ws.Range("B9").Value = breakStart
     ws.Range("B10").Value = breakEnd
