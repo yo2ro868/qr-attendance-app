@@ -111,8 +111,29 @@ try {
         }
     }
     $t.Range('R69').Formula = "='管理'!`$B`$2&"""""     # 氏名
-    # 所属長の氏名：確認日（AC69）を入れると、管理シートの所属長氏名（職員名簿から）が出る。所属長が上書きもできる
-    $t.Range('AC70').Formula = "=IF(ISNUMBER(`$AC`$69),'管理'!`$B`$15&"""","""")"
+    # 最下部の欄（職員名簿から。管理シート B15〜B19 をマクロが写す）。どれも上書きできる
+    #   所属部課（L69）＝部・課。勤務時間管理員 作成日（X69）は空欄：出勤・休暇管理データ の［命令簿をPDFで保存］が、PDF にするときに保存した日を入れる。役職（X70）・氏名（X71）
+    #   所属長 確認日（AC69）は所属長が入れる。確認日を入れると、所属長の所属（AC70）・所属長氏名（AC71）が出る
+    $t.Range('L69').Formula = "='管理'!`$B`$16&"""""
+    $t.Range('X69').MergeArea.ClearContents() | Out-Null
+    # 登庁・退庁の標準時刻（A・B 列。日ごとに2行の結合）：その日（J 列）が「フレックス（申告の内容）」の承認済みの単位期間に入っていれば、
+    # 申告した勤務開始・勤務終了（勤務しない日は空欄）。ほかの日（フレックスでない人・承認前）は 9:00・17:45。本人が上書きできる
+    $fs = "'フレックス（申告の内容）'"
+    $fh = "'フレックス表'"
+    for ($d = 1; $d -le 31; $d++) {
+        $r = 5 + 2 * ($d - 1)
+        $pos = "MATCH(`$J$r,$fs!`$B`$12:`$B`$403,0)"
+        $ok = "INDEX($fh!`$T`$2:`$T`$15,INDEX($fs!`$A`$12:`$A`$403,$pos))=""承認済み"""
+        $fa = "=IFERROR(IF($ok,IF(INDEX($fs!`$AD`$12:`$AD`$403,$pos)="""","""",INDEX($fs!`$AD`$12:`$AD`$403,$pos)/1440),TIME(9,0,0)),TIME(9,0,0))"
+        $fb = "=IFERROR(IF($ok,IF(INDEX($fs!`$AE`$12:`$AE`$403,$pos)="""","""",INDEX($fs!`$AE`$12:`$AE`$403,$pos)/1440),TIME(17,45,0)),TIME(17,45,0))"
+        $rr = $r
+        Retry { $t.Range("A$rr").Formula = $fa } | Out-Null
+        Retry { $t.Range("B$rr").Formula = $fb } | Out-Null
+    }     # 結合したセル（X69:Z69）は、結合の範囲ごと消す
+    $t.Range('X70').Formula = "='管理'!`$B`$18&"""""
+    $t.Range('X71').Formula = "='管理'!`$B`$19&"""""
+    $t.Range('AC70').Formula = "=IF(ISNUMBER(`$AC`$69),'管理'!`$B`$17&"""","""")"
+    $t.Range('AC71').Formula = "=IF(ISNUMBER(`$AC`$69),'管理'!`$B`$15&"""","""")"
     # 前月・当月の最終日の退庁時刻
     $t.Range('BG1').Value2 = '前月の最終日の退庁時刻'
     $t.Range('BG2').Value2 = 'この月の最終日の退庁時刻'
@@ -161,8 +182,8 @@ try {
     }
     $c0 = $t.Range("${table}4").Column
     $i = 0
-    foreach ($h in $cols.Keys) { $t.Cells.Item(4, $c0 + $i).Value2 = [string]$h; $i++ }
-    for ($d = 1; $d -le 31; $d++) { $t.Cells.Item(4 + $d, $c0).Value2 = [double]$d }
+    foreach ($h in $cols.Keys) { $hh = [string]$h; $cc = $c0 + $i; Retry { $t.Cells.Item(4, $cc).Value2 = $hh } | Out-Null; $i++ }
+    for ($d = 1; $d -le 31; $d++) { $dd = $d; Retry { $t.Cells.Item(4 + $dd, $c0).Value2 = [double]$dd } | Out-Null }
     $rng = $t.Range($t.Cells.Item(4, $c0), $t.Cells.Item(35, $c0 + $cols.Count - 1))
     $lo = Retry { $t.ListObjects.Add(1, $rng, $null, 1) }     # xlSrcRange, 見出しあり
     Retry { $lo.Name = '超勤日別' } | Out-Null
@@ -175,7 +196,7 @@ try {
     $t.Range($t.Cells.Item(1, $t.Range('BG1').Column), $t.Cells.Item(1, $c0 + $cols.Count - 1)).EntireColumn.Hidden = $true
 
     # ----- 入力欄の保護を外してシートを保護する（命令簿の保護の設定はそのまま。所属部課と所属長の確認欄・休日の欄を足す） -----
-    foreach ($a in @('L69:O71', 'AC69:AE70', "H${TOP}:H${BOTTOM}")) { $t.Range($a).Locked = $false }
+    foreach ($a in @('L69:O71', 'X69:Z71', 'AC69:AE71', "H${TOP}:H${BOTTOM}")) { $t.Range($a).Locked = $false }
     $t.Activate()
     $win = $xl.ActiveWindow
     $win.FreezePanes = $false

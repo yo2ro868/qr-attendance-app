@@ -1,11 +1,11 @@
 ﻿# 申請・報告シートのひな形に、様式どおりの完成版のシート「申告・割振り簿」を入れる。
 # 総務課の様式の Excel（-Source。シートの保護を外したもの）の「フレックスタイム制」シートをそのまま写し、次のところだけ変える：
-#   ・申告の欄（Z〜AS 列：コアタイム・勤務・休憩の時と分）：本人が「フレックス申告」シートに書いた値を表示する式
-#   ・時間数（AT・AU 列）：フレックス申告シートで計算した時間数（空の欄でも計算が止まらないように）
+#   ・申告の欄（Z〜AS 列：コアタイム・勤務・休憩の時と分）：本人が「フレックス（申告の内容）」シートに書いた値を表示する式
+#   ・時間数（AT・AU 列）：フレックス（申告の内容）シートで計算した時間数（空の欄でも計算が止まらないように）
 #   ・割振りの欄（D〜Y 列）：様式の式のまま（申告の欄を写す）
 #   ・1年間の始期（F4〜I4）：管理シートの始期。単位期間（F5〜I5）：今日を含む単位期間（書き換えると、その期間の合計と表示になる）
-#   ・所属・氏名・所属長氏名・異動後の所属長氏名（AS3〜AS6）：フレックス申告・フレックス割振りシートから
-#   ・備考（AV 列）：フレックス申告シートの備考。単位期間ごとの申告年月日（AW）はフレックス申告、割振年月日はフレックス割振りから
+#   ・所属・氏名・所属長氏名・異動後の所属長氏名（AS3〜AS6）：フレックス（単位期間・承認）シートの上の欄から
+#   ・備考（AV 列）：フレックス（申告の内容）シートの備考。単位期間ごとの申告年月日・割振年月日（AW）はフレックス（単位期間・承認）の表から
 #   ・様式のブックの外を指す名前（月午前 など。使われていない）は消す。入力規則は消す
 #   ・単位期間（F5〜I5）のほかは入力できないように保護する（パスワードなし）
 #   ・本人・所属長には見せない（veryHidden）。管理者は 申請・報告シートの作成.xlsm の［申告・割振り簿を見る］で見る
@@ -18,8 +18,8 @@ $Source = [IO.Path]::GetFullPath($Source)
 if (-not (Test-Path $Source)) { throw "申告・割振り簿の様式のファイルが見つかりません：$Source" }
 
 $FIRST, $LAST, $PERIOD = 12, 403, 28
-$SIN = "'フレックス申告'"
-$WARI = "'フレックス割振り（所属長確認用）'"
+$SIN = "'フレックス（申告の内容）'"
+$PER = "'フレックス（単位期間・承認）'"     # 単位期間の表：9〜22 行目が期間 1〜14（B 開始日、F 申告年月日、H 割振年月日）。C3 所属、C5 所属長氏名、C6 異動後
 
 # Excel が計算などで忙しいと COM の呼び出しが断られる（RPC_E_CALL_REJECTED）ので、少し待ってやり直す
 function Retry([scriptblock]$sb) {
@@ -45,7 +45,7 @@ try {
     $xl.Calculation = -4135
     $wb = $xl.Workbooks.Open($Template)
     foreach ($s in @($wb.Worksheets)) { if ($s.Name -eq '申告・割振り簿') { throw 'ひな形にもう 申告・割振り簿 シートがあります（make_form.py で作り直してから実行してください）' } }
-    $ws.Copy([Type]::Missing, $wb.Worksheets.Item('フレックス割振り（所属長確認用）'))
+    $ws.Copy([Type]::Missing, $wb.Worksheets.Item('フレックス（申告の内容）'))
     $t = $null
     foreach ($s in @($wb.Worksheets)) { if ($s.Name -like 'フレックスタイム制*') { $t = $s } }
     if (-not $t) { throw '写したシートが見つかりません' }
@@ -73,21 +73,21 @@ try {
     $xl.Calculation = -4135    # 手動（式を入れるあいだ再計算しない）
 
     # 1年間の始期・単位期間
-    # 1年間の始期：フレックス申告の日ごとの表の最初の日（単位期間1の開始日。なければ管理シートの始期）。行の日がフレックス申告とそろう
+    # 1年間の始期：フレックス（申告の内容）の日ごとの表の最初の日（単位期間1の開始日。なければ管理シートの始期）。行の日がフレックス申告とそろう
     $t.Range('F4').Formula = "=YEAR($SIN!`$B`$$FIRST)"
     $t.Range('H4').Formula = "=MONTH($SIN!`$B`$$FIRST)"
     $t.Range('I4').Formula = "=DAY($SIN!`$B`$$FIRST)"
-    $now = "IFERROR(LOOKUP(2,1/(($SIN!`$AK`$4:`$AX`$4<>"""")*($SIN!`$AK`$4:`$AX`$4<=TODAY())),$SIN!`$AK`$4:`$AX`$4),$SIN!`$B`$$FIRST)"
+    $now = "IFERROR(LOOKUP(2,1/(($PER!`$B`$9:`$B`$22<>"""")*($PER!`$B`$9:`$B`$22<=TODAY())),$PER!`$B`$9:`$B`$22),$SIN!`$B`$$FIRST)"
     $t.Range('F5').Formula = "=YEAR($now)"
     $t.Range('H5').Formula = "=MONTH($now)"
     $t.Range('I5').Formula = "=DAY($now)"
     # 所属・氏名・所属長氏名・異動後の所属長氏名
-    $t.Range('AS3').Formula = "=IF($SIN!`$D`$3="""","""",$SIN!`$D`$3)"
+    $t.Range('AS3').Formula = "=IF($PER!`$C`$3="""","""",$PER!`$C`$3)"
     $t.Range('AS4').Formula = "='管理'!`$B`$2&"""""
-    $t.Range('AS5').Formula = "=IF($WARI!`$D`$3="""","""",$WARI!`$D`$3)"
-    $t.Range('AS6').Formula = "=IF($WARI!`$D`$4="""","""",$WARI!`$D`$4)"
+    $t.Range('AS5').Formula = "=IF($PER!`$C`$5="""","""",$PER!`$C`$5)"
+    $t.Range('AS6').Formula = "=IF($PER!`$C`$6="""","""",$PER!`$C`$6)"
 
-    # 申告の欄（Z〜AS）← フレックス申告の D〜W、時間数（AT・AU）← X・Y（どれも同じ行）
+    # 申告の欄（Z〜AS）← フレックス（申告の内容）の D〜W、時間数（AT・AU）← X・Y（どれも同じ行）
     $t.Range("Z${FIRST}:AU${LAST}").Formula = "=IF($SIN!D${FIRST}="""","""",$SIN!D${FIRST})"
     # 備考と、単位期間ごとの申告年月日・割振年月日
     for ($r = $FIRST; $r -le $LAST; $r++) {
@@ -96,12 +96,12 @@ try {
         $label = [string]$av.Value2
         $p = [math]::Floor(($r - $FIRST) / $PERIOD) + 1        # 単位期間
         $pr = $FIRST + $p - 1                                   # 単位期間の表の行
-        # その行の日を含む単位期間（フレックス申告の A 列の期間番号）の申告年月日・割振年月日
+        # その行の日を含む単位期間（フレックス（申告の内容）の A 列の期間番号）の申告年月日・割振年月日
         $k = "$SIN!`$A$r"
         if ($label -like '申告年月日*') {
-            $t.Range("AW$r").Formula = "=IFERROR(IF(ISNUMBER(INDEX($SIN!`$AK`$7:`$AX`$7,$k)),INDEX($SIN!`$AK`$7:`$AX`$7,$k),""""),"""")"
+            $t.Range("AW$r").Formula = "=IFERROR(IF(ISNUMBER(INDEX($PER!`$F`$9:`$F`$22,$k)),INDEX($PER!`$F`$9:`$F`$22,$k),""""),"""")"
         } elseif ($label -like '割振年月日*') {
-            $t.Range("AW$r").Formula = "=IFERROR(IF(ISNUMBER(INDEX($WARI!`$AK`$9:`$AX`$9,$k)),INDEX($WARI!`$AK`$9:`$AX`$9,$k),""""),"""")"
+            $t.Range("AW$r").Formula = "=IFERROR(IF(ISNUMBER(INDEX($PER!`$H`$9:`$H`$22,$k)),INDEX($PER!`$H`$9:`$H`$22,$k),""""),"""")"
         } else {
             $av.MergeArea.Cells.Item(1, 1).Formula = "=IF($SIN!`$Z$r="""","""",$SIN!`$Z$r)"
         }

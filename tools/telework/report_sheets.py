@@ -13,7 +13,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.worksheet.page import PageMargins
 
-SHEET, PRINT = "テレワーク報告", "テレワーク実施報告書"
+SHEET, PRINT = "テレワーク報告", "テレワーク報告書（保存用）"     # 印刷用のシート（2026-11-19 までは「テレワーク実施報告書」）
 NOWORK_OVERLAP = "・フレックスで割振り済みの「勤務時間を割り振らない日」です（先に確認・割振りされた方が優先）"
 # 休暇との重なりは、テレワーク予定表の予定と照らす（出勤・休暇管理データ の「テレワーク一覧」）。この報告では見ない
 HEAD, ROWS = 6, 200
@@ -62,18 +62,19 @@ def add(wb, MG, TIME_RANGE, OFF_DAYS, LEAVE, NOWORK=None):
     ws["A1"].font = f_title
     ws["F1"] = "黄色：本人が入力　青：所属長が入力　灰色：自動　赤：直すところ（理由は「確認」の欄）"
     ws["F1"].font = f_note
-    # 3行目：所属（B3:E3 を結合した1つの欄に自由に書く。「○○部○○課」でない所属もあるため）と氏名
+    # 3行目：所属（B3:E3 を結合した1つの欄。職員名簿の部・課が自動で入る（管理シート B16）。違うときは自由に書き直せる）と氏名
     ws["A3"] = "所属"
     ws["A3"].font, ws["A3"].alignment = f_bold, center
     ws.merge_cells("B3:E3")
     for col in "BCDE":
         ws[f"{col}3"].fill, ws[f"{col}3"].border = fill_staff, border
+    ws["B3"] = f'={MG}!$B$16&""'
     ws["B3"].protection = UNLOCK
     ws["B3"].font, ws["B3"].alignment = f_bold, Alignment(horizontal="left", vertical="center", shrink_to_fit=True)
     ws["F3"] = f"=\"氏名：\"&{MG}!$B$2"
     ws["F3"].font, ws["F3"].alignment = f_bold, left
     ws["A4"] = ("テレワークをしたら、1回1行で書き、所属長に Notes でこのファイルのリンクを送って知らせます。"
-                "所属長は内容を確かめて確認日を入れます。印刷は「テレワーク実施報告書」シート（別紙３の様式）で。")
+                "所属長は内容を確かめて確認日を入れます。印刷は「テレワーク報告書（保存用）」シート（別紙３の様式）で。")
     ws["A4"].font = f_note
 
     for i, (label, _, fmt, fill) in enumerate(COLS, start=1):

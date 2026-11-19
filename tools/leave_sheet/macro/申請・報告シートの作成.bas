@@ -14,18 +14,19 @@ Private Const DAY_MIN As Double = 465     ' 年次休暇の1日＝7時間45分�
 Private Const STAFF_LAST As Long = 501    ' 出勤・休暇管理データ の職員名簿の最後の行
 Private Const LEAVE_LAST As Long = 1001   ' 出勤・休暇管理データ の休暇等（計算用シート）の最後の行
 ' 超過勤務等命令簿の月のシート：本人・所属長が書く欄（様式を移行するとき、月のシートの値をこの範囲だけ写す）と、ひな形のシートの名前
-Private Const OT_INPUTS As String = "A5:B66,D5:I66,K5:L66,Y5:AA66,AC5:AE66,L69:O71,AC69:AE70,BH1"
+Private Const OT_INPUTS As String = "A5:B66,D5:I66,K5:L66,Y5:AA66,AC5:AE66,L69:O71,X69:Z71,AC69:AE71,BH1"
 Private Const OT_TEMPLATE As String = "超勤ひな形"
 ' フレックスタイム制のシート：本人・所属長が書く欄（様式を移行するとき、式でないセルを空欄も含めて写す。
 ' 既定の時刻は式なので、本人が消した欄（勤務しない日）は空欄のまま写す）
-Private Const FLEX_SIN As String = "フレックス申告"
-Private Const FLEX_SIN_INPUTS As String = "D3,AK4:AX4,AK7:AX7,H12:Z403"   ' 単位期間の開始日・申告年月日（右上の横の表）を先に、日ごとの欄を後に書く
+Private Const FLEX_SIN As String = "フレックス（申告の内容）"     ' 日ごとの勤務（2026-11-19 から。前は フレックス申告）
+Private Const FLEX_PER As String = "フレックス（単位期間・承認）"  ' 単位期間の表・承認・割振年月日（2026-11-19 から）
+Private Const FLEX_PER_INPUTS As String = "C3,C5,C6,B9:B22,F9:H22"   ' 所属・所属長氏名・異動後・開始日・申告年月日・承認・割振年月日
+Private Const FLEX_SIN_OLD As String = "フレックス申告"       ' 2026-11-19 までのシート名（移行のときに読む）
 Private Const FLEX_DAYS As String = "H12:Z403"          ' 日ごとの欄（12 行目が日ごとの表の最初の日）
 Private Const FLEX_FIRST_DAY As String = "#B12"         ' 読んだ様式の日ごとの表の最初の日（日ごとの欄をずらすのに使う）
-Private Const FLEX_WARI As String = "フレックス割振り（所属長確認用）"
+Private Const FLEX_WARI As String = "フレックス割振り（所属長確認用）"   ' 2026-11-19 までのシート（移行のときに読む）
 Private Const FLEX_WARI_OLD As String = "フレックス割振り"      ' 2026-11-13 までのシート名（移行のときに読む）
 Private Const FLEX_BOOK As String = "申告・割振り簿"            ' 管理者だけが見る完成版（veryHidden）
-Private Const FLEX_WARI_INPUTS As String = "D3,D4,AK8:AX9"       ' 承認・割振年月日（右上の横の表）
 ' テレワーク実施報告：本人・所属長が書く欄（同じく様式を移行するときに写す）
 Private Const TW_REPORT As String = "テレワーク報告"
 Private Const TW_REPORT_INPUTS As String = "B3,B7:I206"      ' B3 所属（1つの欄）
@@ -388,14 +389,22 @@ Private Sub FixOvertimeBh2(wb As Workbook)
     Next s
 End Sub
 
-' 超過勤務のシートで、確認日（AC69）が入っている月の所属長氏名（AC70 の式）を値にする
+' 超過勤務のシートで、確認日（AC69）が入っている月の、職員名簿・フレックスから引く欄（所属部課・勤務時間管理員・所属長の所属と氏名・登庁と退庁の標準時刻）の式を値にする
 Private Sub FreezeBossNames(wb As Workbook)
     Dim s As Worksheet
     For Each s In wb.Worksheets
         If OvertimeMonth(s.Name) > 0 Then
-            If s.Range("AC70").HasFormula And IsNumeric(s.Range("AC69").Value2) And CStr(s.Range("AC69").Value2) <> "" Then
+            If IsNumeric(s.Range("AC69").Value2) And CStr(s.Range("AC69").Value2) <> "" Then
+                Dim ref As Variant
                 s.Unprotect
-                s.Range("AC70").Value = s.Range("AC70").Value
+                For Each ref In Array("L69", "X70", "X71", "AC70", "AC71")
+                    If s.Range(ref).HasFormula Then s.Range(ref).Value = s.Range(ref).Value
+                Next ref
+                ' 登庁・退庁の標準時刻（A・B 列。フレックスの申告から引く式）
+                Dim cell As Range
+                For Each cell In s.Range("A5:B66").Cells
+                    If cell.HasFormula Then cell.Value = cell.Value
+                Next cell
                 ProtectOvertime s
             End If
         End If
@@ -517,34 +526,69 @@ End Function
 ' フレックスのシートとテレワーク報告の書いた欄を読む：(シート名, 番地, 式か値の2次元配列) の一覧。シートがなければ空。
 ' 2026-11-16 までの様式（単位期間の表が AJ11 から縦）は、新しい様式の右上の横の表の番地に並べ替えて読む
 Private Function ReadFlexInputs(wb As Workbook) As Collection
-    Dim result As New Collection, spec As Variant, ws As Worksheet, area As Range, oldLayout As Boolean
-    For Each spec In Array(Array(FLEX_SIN, FLEX_SIN_INPUTS), Array(FLEX_WARI, FLEX_WARI_INPUTS), Array(TW_REPORT, TW_REPORT_INPUTS))
-        Set ws = SheetByName(wb, CStr(spec(0)))
-        If ws Is Nothing And spec(0) = FLEX_WARI Then Set ws = SheetByName(wb, FLEX_WARI_OLD)     ' 前のシート名
+    Dim result As New Collection, ws As Worksheet, wari As Worksheet, area As Range
+    Set ws = SheetByName(wb, FLEX_PER)
+    If Not ws Is Nothing Then
+        ' 今の様式（2026-11-19 から）：フレックス（単位期間・承認）とフレックス（申告の内容）
+        For Each area In ws.Range(FLEX_PER_INPUTS).Areas
+            result.Add Array(FLEX_PER, area.Address(False, False), AreaInputs(area))
+        Next area
+        Set ws = SheetByName(wb, FLEX_SIN)
         If Not ws Is Nothing Then
-            oldLayout = (spec(0) <> TW_REPORT) And (CStr(ws.Range("AJ11").Value) = "期間")
-            If spec(0) = FLEX_SIN Then result.Add Array(FLEX_SIN, FLEX_FIRST_DAY, ws.Range("B12").Value2)
-            If oldLayout And spec(0) = FLEX_SIN Then
-                result.Add Array(FLEX_SIN, "D3", AreaInputs(ws.Range("D3")))
-                result.Add Array(FLEX_SIN, "AK4:AX4", Across(StartInputs(ws, ws.Range("AK12:AK25"))))
-                result.Add Array(FLEX_SIN, "AK7:AX7", Across(AreaInputs(ws.Range("AN12:AN25"))))
-                result.Add Array(FLEX_SIN, FLEX_DAYS, AreaInputs(ws.Range(FLEX_DAYS)))
-            ElseIf spec(0) = TW_REPORT And CStr(ws.Range("C3").Value) = "部" Then
-                ' 2026-11-16 までの様式（B3 部・D3 課）：「○○部○○課」の1つの文にして所属の欄に写す
-                result.Add Array(TW_REPORT, "B3", OneCell(OldSection(ws)))
-                result.Add Array(TW_REPORT, "B7:I206", AreaInputs(ws.Range("B7:I206")))
-            ElseIf oldLayout Then
-                result.Add Array(FLEX_WARI, "D3", AreaInputs(ws.Range("D3")))
-                result.Add Array(FLEX_WARI, "D4", AreaInputs(ws.Range("D4")))
-                result.Add Array(FLEX_WARI, "AK8:AX9", Across(AreaInputs(ws.Range("AO12:AP25"))))
+            result.Add Array(FLEX_SIN, FLEX_FIRST_DAY, ws.Range("B12").Value2)
+            result.Add Array(FLEX_SIN, FLEX_DAYS, AreaInputs(ws.Range(FLEX_DAYS)))
+        End If
+    Else
+        ' 前の様式：フレックス申告（単位期間の表は右上に横。2026-11-16 までは右に縦で AJ11 が「期間」）と、フレックス割振り
+        Set ws = SheetByName(wb, FLEX_SIN_OLD)
+        If Not ws Is Nothing Then
+            result.Add Array(FLEX_SIN, FLEX_FIRST_DAY, ws.Range("B12").Value2)
+            result.Add Array(FLEX_PER, "C3", NoBlank(AreaInputs(ws.Range("D3"))))      ' 所属（空欄なら、職員名簿の部・課の式のまま）
+            If CStr(ws.Range("AJ11").Value) = "期間" Then
+                result.Add Array(FLEX_PER, "B9:B22", StartInputs(ws, ws.Range("AK12:AK25")))
+                result.Add Array(FLEX_PER, "F9:F22", AreaInputs(ws.Range("AN12:AN25")))
             Else
-                For Each area In ws.Range(CStr(spec(1))).Areas
-                    result.Add Array(CStr(spec(0)), area.Address(False, False), AreaInputs(area))
-                Next area
+                result.Add Array(FLEX_PER, "B9:B22", Across(AreaInputs(ws.Range("AK4:AX4"))))
+                result.Add Array(FLEX_PER, "F9:F22", Across(AreaInputs(ws.Range("AK7:AX7"))))
+            End If
+            result.Add Array(FLEX_SIN, FLEX_DAYS, AreaInputs(ws.Range(FLEX_DAYS)))
+        End If
+        Set wari = SheetByName(wb, FLEX_WARI)
+        If wari Is Nothing Then Set wari = SheetByName(wb, FLEX_WARI_OLD)     ' 2026-11-13 までのシート名
+        If Not wari Is Nothing Then
+            result.Add Array(FLEX_PER, "C5", NoBlank(AreaInputs(wari.Range("D3"))))   ' 所属長氏名（空欄なら、職員名簿の式のまま）
+            result.Add Array(FLEX_PER, "C6", AreaInputs(wari.Range("D4")))
+            If CStr(wari.Range("AJ11").Value) = "期間" Then
+                result.Add Array(FLEX_PER, "G9:H22", AreaInputs(wari.Range("AO12:AP25")))
+            Else
+                result.Add Array(FLEX_PER, "G9:H22", Across(AreaInputs(wari.Range("AK8:AX9"))))
             End If
         End If
-    Next spec
+    End If
+    ' テレワーク報告
+    Set ws = SheetByName(wb, TW_REPORT)
+    If Not ws Is Nothing Then
+        If CStr(ws.Range("C3").Value) = "部" Then
+            ' 2026-11-16 までの様式（B3 部・D3 課）：「○○部○○課」の1つの文にして所属の欄に写す
+            result.Add Array(TW_REPORT, "B3", OneCell(OldSection(ws)))
+            result.Add Array(TW_REPORT, "B7:I206", AreaInputs(ws.Range("B7:I206")))
+        Else
+            For Each area In ws.Range(TW_REPORT_INPUTS).Areas
+                If area.Address(False, False) = "B3" Then
+                    result.Add Array(TW_REPORT, "B3", NoBlank(AreaInputs(area)))     ' 所属（空欄なら、職員名簿の部・課の式のまま）
+                Else
+                    result.Add Array(TW_REPORT, area.Address(False, False), AreaInputs(area))
+                End If
+            Next area
+        End If
+    End If
     Set ReadFlexInputs = result
+End Function
+
+' 1つの欄の値で、空欄（""）なら書かない（Empty）。新しい様式の式（職員名簿から入る既定）を残すため
+Private Function NoBlank(v As Variant) As Variant
+    If CStr(v(1, 1)) = "" Then v(1, 1) = Empty
+    NoBlank = v
 End Function
 
 ' 前の様式のテレワーク報告の所属（B3 部・D3 課）を1つの文にする
@@ -766,7 +810,7 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
     For c = 0 To UBound(cols)
         If HasColumn(lo, CStr(cols(c))) Then
             For r = 1 To n
-                With lo.ListColumns(CStr(cols(c))).DataBodyRange.Cells(r)
+                With lo.ListColumns(ColumnName(lo, CStr(cols(c)))).DataBodyRange.Cells(r)
                     If Not .HasFormula And CStr(.Value2) <> "" Then
                         vals(r, c) = .Value2
                         hasValue(r, c) = True
@@ -818,9 +862,9 @@ Private Function MigrateOne(path As String, fileName As String, tplPath As Strin
                         text = CStr(vals(r, c))
                         If text = "1日単位" Then text = "日単位"
                         If text = "時間単位" Then text = "時間・分単位"
-                        lo.ListColumns(CStr(cols(c))).DataBodyRange.Cells(target).Value2 = text
+                        lo.ListColumns(ColumnName(lo, CStr(cols(c)))).DataBodyRange.Cells(target).Value2 = text
                     Else
-                        lo.ListColumns(CStr(cols(c))).DataBodyRange.Cells(target).Value2 = vals(r, c)
+                        lo.ListColumns(ColumnName(lo, CStr(cols(c)))).DataBodyRange.Cells(target).Value2 = vals(r, c)
                     End If
                 End If
             Next c
@@ -874,10 +918,16 @@ Private Function NameParts(f As String) As String()
     NameParts = Split(s, "　")
 End Function
 
+' 表の列があるか（見出しの改行は除いて比べる：「承認」＋改行＋「（所属長）」と「承認（所属長）」は同じ列）
 Private Function HasColumn(lo As ListObject, name As String) As Boolean
+    HasColumn = (ColumnName(lo, name) <> "")
+End Function
+
+' 表の列の、本当の見出し（改行も含む）。見出しの改行を除いて name と同じ列。なければ ""
+Private Function ColumnName(lo As ListObject, name As String) As String
     Dim col As ListColumn
     For Each col In lo.ListColumns
-        If col.Name = name Then HasColumn = True: Exit Function
+        If Replace(Replace(col.Name, vbLf, ""), vbCr, "") = Replace(Replace(name, vbLf, ""), vbCr, "") Then ColumnName = col.Name: Exit Function
     Next col
 End Function
 
@@ -997,7 +1047,7 @@ Private Sub ReadMatching(matchPath As String)
         Set src = Workbooks.Open(Filename:=matchPath, UpdateLinks:=0, ReadOnly:=True)
         openedHere = True
     End If
-    staff = src.Worksheets("職員名簿").Range("A2:L" & STAFF_LAST).Value2     ' C・D は休憩の始め・終わり、J・K は養育する子の数・要介護者の数、L は所属長氏名
+    staff = src.Worksheets("職員名簿").Range("A2:O" & STAFF_LAST).Value2     ' C・D は休憩の始め・終わり、J・K は養育する子の数・要介護者の数、L 所属長氏名、M 所属長の所属、N・O 勤務時間管理員の役職・氏名
     ' C・D は休憩の始め・終わり（短縮の特例の人だけ）
     keys = src.Worksheets("計算用").Range("H2:H" & LEAVE_LAST).Value
     totals = src.Worksheets("計算用").Range("K2:K" & LEAVE_LAST).Value
@@ -1041,7 +1091,8 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     ws.Range("B5").Value = adj
     ws.Range("B6").Value = Now
     ' 休憩時間：職員名簿に書いてあればそれ、なければ 12:00〜13:00
-    Dim breakStart As Double, breakEnd As Double, k As Long, children As Variant, carees As Variant, boss As String
+    Dim breakStart As Double, breakEnd As Double, k As Long, children As Variant, carees As Variant, boss As String, section As String
+    Dim bossSection As String, clerkTitle As String, clerkName As String
     breakStart = 12 / 24
     breakEnd = 13 / 24
     children = Empty: carees = Empty
@@ -1051,6 +1102,11 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
             If CStr(staff(k, 10)) <> "" And IsNumeric(staff(k, 10)) Then children = CLng(staff(k, 10))
             If CStr(staff(k, 11)) <> "" And IsNumeric(staff(k, 11)) Then carees = CLng(staff(k, 11))
             If Not IsError(staff(k, 12)) Then boss = Trim$(CStr(staff(k, 12)))
+            If Not IsError(staff(k, 13)) Then bossSection = Trim$(CStr(staff(k, 13)))
+            If Not IsError(staff(k, 14)) Then clerkTitle = Trim$(CStr(staff(k, 14)))
+            If Not IsError(staff(k, 15)) Then clerkName = Trim$(CStr(staff(k, 15)))
+            ' 所属：部・課（E・F。部が空欄なら課だけ）。フレックス（単位期間・承認）の所属の既定
+            If Not IsError(staff(k, 5)) And Not IsError(staff(k, 6)) Then section = Trim$(Trim$(CStr(staff(k, 5))) & " " & Trim$(CStr(staff(k, 6))))
             If IsNumeric(staff(k, 3)) And IsNumeric(staff(k, 4)) And CStr(staff(k, 3)) <> "" And CStr(staff(k, 4)) <> "" Then
                 breakStart = staff(k, 3)
                 breakEnd = staff(k, 4)
@@ -1060,10 +1116,15 @@ Private Function UpdateOne(path As String, id As String, nm As String, yr As Lon
     Next k
     ws.Range("B13").Value = children
     ws.Range("B14").Value = carees
-    ' 所属長氏名：超過勤務のシートの確認欄（AC70）が引く。変わる前に、確認日のある月の氏名を値にして残す（異動しても前の所属長の名前のまま）
-    If CStr(ws.Range("B15").Value) <> boss Then FreezeBossNames wb
+    ' 所属長氏名・所属・勤務時間管理員などは、超過勤務のシートの最下部の欄が引く。変わる前に、確認日のある月の欄を値にして残す（異動しても前の名前のまま）
+    ' 確認済みの月は、名簿やフレックスの申告があとで変わっても変わらないように、引いている欄を値にする（更新のたびに）
+    FreezeBossNames wb
     FixOvertimeBh2 wb
     ws.Range("B15").Value = boss
+    ws.Range("B16").Value = section
+    ws.Range("B17").Value = bossSection
+    ws.Range("B18").Value = clerkTitle
+    ws.Range("B19").Value = clerkName
     ws.Range("B9").Value = breakStart
     ws.Range("B10").Value = breakEnd
     ws.Range("B7").Value = carry

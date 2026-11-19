@@ -611,7 +611,8 @@ End Sub
 ' ===== テレワーク実施報告書（テレワーク報告シートの［実施報告書を見る］［実施報告書をPDFで保存］） =====
 ' 報告は、その職員の申請・報告シートの「テレワーク実施報告書」シート（別紙３の様式）で見る。申請・報告シートは読み取り専用で開き、
 ' 印刷する番号（M2）に報告の番号を入れる（保存しないので、申請・報告シートは変わらない）。
-Private Const TW_PRINT As String = "テレワーク実施報告書"
+Private Const TW_PRINT As String = "テレワーク報告書（保存用）"
+Private Const TW_PRINT_OLD As String = "テレワーク実施報告書"     ' 2026-11-19 までのシート名
 Private Const TW_PDF_DIR As String = "テレワーク実施報告書"     ' PDF を置くフォルダ（申請・報告シートのフォルダと同じ場所に作る）
 
 ' ［実施報告書を見る］：選んでいる行の報告を、実施報告書の様式で表示する（印刷・PDF の保存は、表示した画面からもできる）
@@ -623,7 +624,7 @@ Public Sub ShowTwReport()
     If wb Is Nothing Then Exit Sub
     If Not SetTwNumber(wb, lo, CLng(rows(1))) Then Exit Sub
     wb.Activate
-    wb.Worksheets(TW_PRINT).Activate
+    TwPrintSheet(wb).Activate
     If rows.Count > 1 Then MsgBox "選んだ行のうち、いちばん上の報告を表示しました（何件かまとめて保存するときは［実施報告書をPDFで保存］）。", vbInformation
 End Sub
 
@@ -646,7 +647,7 @@ Public Sub SaveTwReports()
             If SetTwNumber(wb, lo, r) Then
                 fname = "テレワーク実施報告書　" & CellText(lo, r, "出勤用ID") & "　" & CellText(lo, r, "氏名") & "　" & _
                         Format(lo.ListColumns("実施日").DataBodyRange.Cells(r).Value, "yyyy-mm-dd") & "（" & CellText(lo, r, "番号") & "）.pdf"
-                wb.Worksheets(TW_PRINT).ExportAsFixedFormat Type:=xlTypePDF, Filename:=outDir & "\" & fname, _
+                TwPrintSheet(wb).ExportAsFixedFormat Type:=xlTypePDF, Filename:=outDir & "\" & fname, _
                     Quality:=xlQualityStandard, IgnorePrintAreas:=False, OpenAfterPublish:=False
                 n = n + 1
             End If
@@ -705,11 +706,19 @@ Private Function LeaveFolder() As String
     If Right(LeaveFolder, 1) = "\" Then LeaveFolder = Left(LeaveFolder, Len(LeaveFolder) - 1)
 End Function
 
+' 申請・報告シートの実施報告書のシート（今の名前、なければ前の名前）。どちらもなければ Nothing
+Private Function TwPrintSheet(wb As Workbook) As Worksheet
+    On Error Resume Next
+    Set TwPrintSheet = wb.Worksheets(TW_PRINT)
+    If TwPrintSheet Is Nothing Then Set TwPrintSheet = wb.Worksheets(TW_PRINT_OLD)
+    On Error GoTo 0
+End Function
+
 ' 実施報告書のシートの印刷する番号（M2）に、表の r 行目の報告の番号を入れる
 Private Function SetTwNumber(wb As Workbook, lo As ListObject, r As Long) As Boolean
     Dim ps As Worksheet
     On Error Resume Next
-    Set ps = wb.Worksheets(TW_PRINT)
+    Set ps = TwPrintSheet(wb)
     On Error GoTo 0
     If ps Is Nothing Then
         MsgBox wb.Name & " に「" & TW_PRINT & "」がありません（様式が古いので、［様式を移行］をしてください）。", vbExclamation
@@ -809,8 +818,17 @@ Public Sub SaveOvertimePdfs()
                         n = 0
                         If times.Exists(k) Then n = times(k)
                         fname = "超過勤務等命令簿　" & Mid$(sheetName, 4) & "　" & id & "　" & nm & IIf(n = 0, "", "（" & (n + 1) & "）") & ".pdf"
+                        ' 勤務時間管理員 作成日（X69）に、PDF にした日を入れてから書き出す（休暇申請シートは保存しない。書き出したら元に戻す）
+                        Dim oldX69 As String, wasProt As Boolean
+                        oldX69 = ws.Range("X69").Formula
+                        wasProt = ws.ProtectContents
+                        If wasProt Then ws.Unprotect
+                        ws.Range("X69").Value = Date
+                        ws.Range("X69").NumberFormat = "ggge""年""m""月""d""日"""
                         ws.ExportAsFixedFormat Type:=xlTypePDF, Filename:=outDir & "\" & fname, _
                             Quality:=xlQualityStandard, IgnorePrintAreas:=False, OpenAfterPublish:=False
+                        ws.Range("X69").Formula = oldX69
+                        If wasProt Then ws.Protect DrawingObjects:=True, Contents:=True, Scenarios:=False, AllowFormattingCells:=True, AllowFormattingColumns:=True, AllowFormattingRows:=True
                         last = last + 1
                         logWs.Cells(last, 1).Value = Now
                         logWs.Cells(last, 2).NumberFormat = "@"

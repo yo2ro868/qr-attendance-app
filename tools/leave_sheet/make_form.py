@@ -30,7 +30,7 @@ FONT = "ＭＳ Ｐゴシック"
 DAY_MIN = 465         # 1日＝7時間45分＝465分
 CARRY_MAX = 20        # 翌年に繰り越せる日数の上限
 ROWS = 300            # 申請を書ける行数（保護したシートでは表に行を足せないので、先に用意しておく）
-HEAD = 8              # 申請の表の見出しの行（上の2〜5行目は年次休暇・病気休暇・看護休暇、7行目は説明）
+HEAD = 9              # 申請の表の見出しの行（上の2〜3行目は年次休暇、4行目は空き、5〜6行目は病気休暇・看護休暇、8行目は説明）
 FIRST, LAST = HEAD + 1, HEAD + ROWS
 
 KINDS = ["年次休暇", "病気休暇", "看護休暇（子の看護等）", "特別休暇（看護休暇以外）",
@@ -78,7 +78,7 @@ UNIT_TIME_ONLY = ["介護時間", "育児時間"]     # 時間・分単位だけ
 UNIT_DAY_ONLY = ["ボランティア"]              # 日単位だけ（ボランティアは時間単位に分けられない）
 APPROVALS = ["承認", "却下", "取消"]
 # 様式の版。申請シートの式や列を変えたら変える（マクロが、ひな形と版の違う申請・報告シートを結果シートで知らせる）
-FORM_VERSION = "2026-11-19b"
+FORM_VERSION = "2026-11-19j"
 
 f_base = Font(name=FONT, size=10)
 f_bold = Font(name=FONT, size=10, bold=True)
@@ -122,11 +122,11 @@ COLS = [
     ("開始日", 13, "yyyy/m/d", fill_staff),     # 2026/12/31 のような8桁の日付が入る幅
     ("終了日", 13, "yyyy/m/d", fill_staff),
     ("日数", 6, "0", fill_calc),     # 開始日・終了日から自動で計算（土日・祝日・年末年始を除く）
-    ("開始時刻", 8, "h:mm", fill_staff),
-    ("終了時刻", 8, "h:mm", fill_staff),
+    ("開始\n時刻", 8, "h:mm", fill_staff),     # 見出しは「開始」「終了」で改行（マクロの［様式を移行］は改行を除いて列を探す）
+    ("終了\n時刻", 8, "h:mm", fill_staff),
     ("時間", 7, "[h]:mm", fill_calc),   # 開始時刻・終了時刻から休憩を除いて自動で計算（打ち込めない）
     ("事由", 22, None, fill_staff),
-    ("承認（所属長）", 9, None, fill_boss),
+    ("承認\n（所属長）", 9, None, fill_boss),     # 見出しは「承認」で改行（Power Query・マクロは前の名前「承認（所属長）」も読む）
     ("承認日", 11, "yyyy/m/d", fill_boss),
     ("所属長コメント", 18, None, fill_boss),
     ("確認", 30, None, fill_calc),
@@ -163,7 +163,8 @@ for i, label in enumerate(["出勤用ID", "氏名", "年", "合計（分）", "�
 mg["B1"].number_format = "@"
 mg["A11"], mg["B11"] = "様式の版", FORM_VERSION
 # 養育する子の数・要介護者の数（マクロが職員名簿の L・M 列から書き込む。看護休暇・短期介護の1年の上限に使う）
-mg["A13"], mg["A14"], mg["A15"] = "養育する子の数", "要介護者の数", "所属長氏名"
+mg["A13"], mg["A14"], mg["A15"], mg["A16"] = "養育する子の数", "要介護者の数", "所属長氏名", "所属（部・課）"
+mg["A17"], mg["A18"], mg["A19"] = "所属長の所属", "勤務時間管理員の役職", "勤務時間管理員の氏名"
 mg["B11"].number_format = "@"
 mg["B9"], mg["B10"] = 12 / 24, 13 / 24     # 12:00〜13:00
 mg["B9"].number_format = mg["B10"].number_format = "h:mm"
@@ -221,18 +222,18 @@ wb.defined_names["休日"] = DefinedName("休日", attr_text=OFF_DAYS)
 wb.defined_names["振替"] = DefinedName("振替", attr_text=f"{MG}!$X$1:$X$2")
 mg.sheet_state = "veryHidden"     # 本人・所属長からは見えない（Excel の［再表示］にも出ない）
 
-# ----- 2〜3行目：氏名と年次休暇の残りなど（自動）。4行目は分の計算用で非表示 -----
+# ----- 2〜3行目：氏名と年次休暇の残りなど（自動）。4行目は空き、5〜6行目は病気休暇・看護休暇、7行目は分の計算用で非表示 -----
 rng = lambda c: f"${c}${FIRST}:${c}${LAST}"
 KIND, MIN, YEAR, OK = rng("B"), rng("P"), rng("Q"), rng("L")
 # 上の欄：2〜3行目は年次休暇（見出し・値）を3つのかたまり［繰越分・本年分・合計］［本年使用（承認済み）・本年使用（承認待ち）・残り］［翌年繰越］に、
-# 4〜5行目は病気休暇・看護休暇（承認済み）。6行目は分の計算用（非表示）、7行目は書き方の説明
-MIN_ROW = 6
+# 4行目は間をあける空の行、5〜6行目は病気休暇・看護休暇（承認済み）。7行目は分の計算用（非表示）、8行目は書き方の説明
+MIN_ROW = 7
 # 看護休暇（子の看護等）・短期介護（特別休暇）の1年の上限：子・要介護者が1人なら5日、2人以上なら10日（空欄なら上限なし＝表示しない）
 CHILDREN, CAREES = f"{MG}!$B$13", f"{MG}!$B$14"
 CARE_LIMIT = lambda n: f'IF({n}="","",IF(N({n})>=2,10,IF(N({n})=1,5,0))*{DAY_MIN})'
 SHORT_CARE = "短期介護"
 C_RANGE = rng("C")
-# 6行目：M 看護休暇（承認済み・分）は TOP、N 看護休暇の上限、O 短期介護（承認済み）、P 短期介護の上限、Q・R 承認待ちも含めた計
+# 7行目：M 看護休暇（承認済み・分）は TOP、N 看護休暇の上限、O 短期介護（承認済み）、P 短期介護の上限、Q・R 承認待ちも含めた計
 ws[f"N{MIN_ROW}"] = "=" + CARE_LIMIT(CHILDREN)
 ws[f"O{MIN_ROW}"] = f'=SUMIFS({MIN},{KIND},"{KIND_SPECIAL}",{C_RANGE},"{SHORT_CARE}",{YEAR},{YR},{OK},"承認")'
 ws[f"P{MIN_ROW}"] = "=" + CARE_LIMIT(CAREES)
@@ -265,19 +266,19 @@ TOP = [   # （見出し, 最初の列, 最後の列, 見出しの行, 分の式
     ("本年分", "D", "D", 2, f"=N({GRANT})", days_text(f"D{MIN_ROW}")),
     ("合計", "E", "E", 2, f"=N({HOLD})", days_text(f"E{MIN_ROW}")),
     # 本年使用＝ 出勤・休暇管理データ の調整（導入前の使用など）＋ この用紙の承認済みの年次休暇
-    ("本年使用（承認済み）", "F", "F", 2,
+    ("本年使用\n（承認済み）", "F", "F", 2,
      f'=N({ADJ})+SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"承認")', days_text(f"F{MIN_ROW}")),
-    ("本年使用（承認待ち）", "G", "H", 2, f'=SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"")', days_text(f"G{MIN_ROW}")),
+    ("本年使用\n（承認待ち）", "G", "H", 2, f'=SUMIFS({MIN},{KIND},"年次休暇",{YEAR},{YR},{OK},"")', days_text(f"G{MIN_ROW}")),
     ("残り", "I", "J", 2, f"=E{MIN_ROW}-F{MIN_ROW}", days_text(f"I{MIN_ROW}")),
     # 翌年繰越：残りの1日未満を切り捨て、上限20日（出勤・休暇管理データ の計算用シートと同じ）
     ("翌年繰越", "K", "K", 2, f"=MIN({CARRY_MAX * DAY_MIN},INT(MAX(0,I{MIN_ROW})/{DAY_MIN})*{DAY_MIN})", days_text(f"K{MIN_ROW}")),
-    ("病気休暇（承認済み）", "C", "D", 4, f'=SUMIFS({MIN},{KIND},"病気休暇",{YEAR},{YR},{OK},"承認")', hm_text(f"C{MIN_ROW}")),
-    ("看護休暇（承認済み）", "E", "F", 4, f'=SUMIFS({MIN},{KIND},"看護休暇（子の看護等）",{YEAR},{YR},{OK},"承認")', days_text(f"E{MIN_ROW}")),
-    ("看護休暇の残り", "G", "H", 4, None, care_left("M", "N", "子")),
-    ("短期介護（承認済み）", "I", "J", 4, None, days_text(f"O{MIN_ROW}")),
-    ("短期介護の残り", "K", "K", 4, None, care_left("O", "P", "要介護者")),
+    ("病気休暇（承認済み）", "C", "D", 5, f'=SUMIFS({MIN},{KIND},"病気休暇",{YEAR},{YR},{OK},"承認")', hm_text(f"C{MIN_ROW}")),
+    ("看護休暇（承認済み）", "E", "F", 5, f'=SUMIFS({MIN},{KIND},"看護休暇（子の看護等）",{YEAR},{YR},{OK},"承認")', days_text(f"E{MIN_ROW}")),
+    ("看護休暇の残り", "G", "H", 5, None, care_left("M", "N", "子")),
+    ("短期介護\n（承認済み）", "I", "J", 5, None, days_text(f"O{MIN_ROW}")),
+    ("短期介護の残り", "K", "K", 5, None, care_left("O", "P", "要介護者")),
 ]
-# 分の計算用の行（6行目）は、病気・看護の列が年次休暇と重なるので、病気・看護は L・M 列に置く
+# 分の計算用の行（7行目）は、病気・看護の列が年次休暇と重なるので、病気・看護は L・M 列に置く
 SICK_MIN = {"病気休暇（承認済み）": "L", "看護休暇（承認済み）": "M"}
 for label, c1, c2, row, minutes, text in TOP:
     vr = row + 1
@@ -294,7 +295,8 @@ for label, c1, c2, row, minutes, text in TOP:
     for col in {c1, c2}:
         ws[f"{col}{row}"].border = ws[f"{col}{vr}"].border = border
         ws[f"{col}{vr}"].fill = fill_calc
-    ws[f"{c1}{row}"].font, ws[f"{c1}{row}"].alignment = f_bold, center
+    ws[f"{c1}{row}"].font = f_bold
+    ws[f"{c1}{row}"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)     # 見出しの「\n」で改行
     ws[f"{c1}{vr}"].font, ws[f"{c1}{vr}"].alignment = f_bold, center
     if minutes:
         ws[f"{mc}{MIN_ROW}"] = minutes
@@ -314,12 +316,12 @@ def outline(c1, c2, r1, r2):
                                  top=medium if r == r1 else b.top, bottom=medium if r == r2 else b.bottom)
 
 
-ws.conditional_formatting.add("G5:H5", FormulaRule(formula=[f'AND($N${MIN_ROW}<>"",$Q${MIN_ROW}>$N${MIN_ROW})'], fill=fill_bad_top, font=font_bad_top))
-ws.conditional_formatting.add("K5", FormulaRule(formula=[f'AND($P${MIN_ROW}<>"",$R${MIN_ROW}>$P${MIN_ROW})'], fill=fill_bad_top, font=font_bad_top))
-for c1, c2, r1, r2 in (("C", "E", 2, 3), ("F", "J", 2, 3), ("K", "K", 2, 3), ("C", "D", 4, 5), ("E", "H", 4, 5), ("I", "K", 4, 5)):
+ws.conditional_formatting.add("G6:H6", FormulaRule(formula=[f'AND($N${MIN_ROW}<>"",$Q${MIN_ROW}>$N${MIN_ROW})'], fill=fill_bad_top, font=font_bad_top))
+ws.conditional_formatting.add("K6", FormulaRule(formula=[f'AND($P${MIN_ROW}<>"",$R${MIN_ROW}>$P${MIN_ROW})'], fill=fill_bad_top, font=font_bad_top))
+for c1, c2, r1, r2 in (("C", "E", 2, 3), ("F", "J", 2, 3), ("K", "K", 2, 3), ("C", "D", 5, 6), ("E", "H", 5, 6), ("I", "K", 5, 6)):
     outline(c1, c2, r1, r2)
-# B4 は空欄（2026-11-19 に見出し「病気休暇・看護休暇・短期介護」を外した）
-for r in (2, 4):
+# 4行目は空の行（2026-11-19 に年次休暇と病気休暇・看護休暇の間をあけた）。B5 は空欄（見出し「病気休暇・看護休暇・短期介護」を外した）
+for r in (2, 5):
     ws.row_dimensions[r].height = 28
 for r in (3, 5):
     ws.row_dimensions[r].height = 30     # 「24日5時間45分」が折り返しても切れないように
@@ -330,11 +332,11 @@ for ref in ("L2", "L3"):
     ws[ref].font = f_note
     ws[ref].alignment = Alignment(vertical="center")
 
-# ----- 8行目から：申請の表 -----
-ws["A7"] = ("申請は1件1行で上から順に。種別・内容と時刻は一覧から選びます（一覧にないものも書けます。特別休暇の種別は除く）。事由は自由に書きます（要るときは「確認」の欄に記入例が出ます。忌引は続柄を一覧から選びます）。"
+# ----- 9行目から：申請の表 -----
+ws["A8"] = ("申請は1件1行で上から順に。種別・内容と時刻は一覧から選びます（一覧にないものも書けます。特別休暇の種別は除く）。事由は自由に書きます（要るときは「確認」の欄に記入例が出ます。忌引は続柄を一覧から選びます）。"
             "妻の出産・育児参加・産前・産後・保育時間は、右端の基準日（出産予定日・出産日・子の生年月日）も入れます。"
             "時間（1日あたり）は開始時刻・終了時刻から休憩を除いて自動で入ります。種別・内容を書いた行の事由は不要です。")
-ws["A7"].font = f_note
+ws["A8"].font = f_note
 for i, (label, _, fmt, fill) in enumerate(COLS, start=1):
     h = ws.cell(row=HEAD, column=i, value=label)
     h.font, h.alignment, h.border, h.fill = f_head, center, border, fill_head
@@ -654,7 +656,7 @@ for i, text in enumerate([
     "・承認済みの申請と日時が重なると赤くなり、所属長は承認できません。日時を直してください。",
     "・足りない欄や誤りのある欄は赤くなり、理由が「確認」の欄に出ます。赤い欄がなくなるように書き直してください。",
     "・上の「年次休暇の残り」で、残日数と承認待ちが分かります（1日＝7時間45分）。",
-    "・4〜5行目に、看護休暇（子の看護等）と短期介護の残りが出ます（上限は1年に、子・要介護者が1人なら5日、2人以上なら10日。人数は管理者が職員名簿に入れます）。上限を超えると赤くなります。",
+    "・5〜6行目に、看護休暇（子の看護等）と短期介護の残りが出ます（上限は1年に、子・要介護者が1人なら5日、2人以上なら10日。人数は管理者が職員名簿に入れます）。上限を超えると赤くなります。",
     "・承認された行は書き換えないでください。取り消したいときは所属長に伝えます。",
     "",
     "■ 所属長",
@@ -666,22 +668,22 @@ for i, text in enumerate([
     "・このファイルは管理者の OneDrive にあり、本人と所属長にだけ共有しています。ほかの人には見えません。",
     "",
     "■ フレックスタイム制（フレックスタイム制で勤務する人）",
-    "・本人：「フレックス申告」シートに、単位期間（4週間）ごとの勤務開始・終了・休憩を時と分に分けて書き、右の表の申告年月日を入れて所属長に伝えます。",
-    "・所属長：「フレックス割振り（所属長確認用）」シートで内容を確かめ、右の表の承認の欄で「承認」を選び、割振年月日を入れます。",
+    "・本人：「フレックス（単位期間・承認）」シートに単位期間（4週間）の開始日を入れ、「フレックス（申告の内容）」シートに日ごとの勤務開始・終了・休憩を時と分に分けて書きます。合計が155時間になったら、単位期間の表の申告年月日を入れて所属長に伝えます。",
+    "・所属長：「フレックス（申告の内容）」シートで内容を確かめ、「フレックス（単位期間・承認）」シートの承認の欄で「承認」を選び、割振年月日を入れます。",
     "・総務課の様式どおりの完成版「申告・割振り簿」は、管理者だけが見るシートです（ここには表示されません）。管理者は 申請・報告シートの作成.xlsm の［申告・割振り簿を見る］で表示・印刷します。",
     "・承認の後で申告を書き直したら、申告年月日を書き直した日にします。所属長が割振年月日を書き直す（承認し直す）まで、承認されていない扱いになります。",
     "",
     "■ テレワーク実施報告",
     "・本人：テレワークをしたら「テレワーク報告」シートに1回1行で、提出日・実施日・開始時刻・終了時刻・業務内容（備考）を書き、所属長に Notes でこのファイルのリンクを送って知らせます。",
     "・所属長：同じ行の青の欄に確認日（必要ならコメント）を入れます。",
-    "・「テレワーク実施報告書」シートは別紙３の様式どおりの印刷用です（改ページプレビューで、印刷の形のまま表示）。M2 に印刷する番号（テレワーク報告シートの番号）を入れると、薄い色の欄に入ります（式が入っているので、M2 のほかは書き換えられません。薄い色は印刷されません）。",
+    "・「テレワーク報告書（保存用）」シートは別紙３の様式（テレワーク実施報告書）どおりの印刷用です（改ページプレビューで、印刷の形のまま表示）。M2 に印刷する番号（テレワーク報告シートの番号）を入れると、薄い色の欄に入ります（式が入っているので、M2 のほかは書き換えられません。薄い色は印刷されません）。",
 ], start=3):
     us[f"A{i}"] = text
     us[f"A{i}"].font = f_bold if text.startswith("■") else f_base
 
 # シートの見出しの色：作業のまとまりごと（休暇＝緑、フレックス＝青、テレワーク＝オレンジ、超過勤務＝紫（add_overtime_sheet.ps1）、使い方＝灰色）
-TAB = {"休暇申請": "548235", "フレックス申告": "2E75B6", flex_sheets.WARI: "2E75B6",
-       "テレワーク報告": "C55A11", "テレワーク実施報告書": "C55A11", "使い方": "7F7F7F"}
+TAB = {"休暇申請": "548235", flex_sheets.PER: "2E75B6", flex_sheets.SIN: "2E75B6",
+       "テレワーク報告": "C55A11", report_sheets.PRINT: "C55A11", "使い方": "7F7F7F"}
 for name, color in TAB.items():
     wb[name].sheet_properties.tabColor = color
 # 並び：休暇 → フレックス → テレワーク → 使い方（非表示のシートは後ろ）
