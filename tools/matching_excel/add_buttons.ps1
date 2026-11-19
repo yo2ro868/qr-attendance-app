@@ -48,6 +48,13 @@ try {
     $btn.OLEFormat.Object.Caption = '超過勤務を転記'
     $btn.OnAction = 'TransferOvertime'
     $btn.Placement = 2      # セルに合わせて動く（列の幅が変わっても B2 に重ならない）
+    # ［命令簿をPDFで保存］（命令簿の保存シートの B2 の保存先の右）
+    $ws = $wb.Worksheets.Item('命令簿の保存')
+    $c = $ws.Range('G2')
+    $btn = $ws.Shapes.AddFormControl(0, $c.Left + 6, $c.Top + 2, 160, 26)
+    $btn.OLEFormat.Object.Caption = '命令簿をPDFで保存'
+    $btn.OnAction = 'SaveOvertimePdfs'
+    $btn.Placement = 3
     # ［名簿の人の行を足す］（休暇等シートの使い方の文の上。AQ1）
     $ws = $wb.Worksheets.Item('休暇等')
     $c = $ws.Range('AQ1')

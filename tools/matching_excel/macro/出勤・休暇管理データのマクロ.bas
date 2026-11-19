@@ -726,6 +726,174 @@ Private Function TwPdfDir() As String
     If Dir(TwPdfDir, vbDirectory) = "" Then MkDir TwPdfDir
 End Function
 
+' ===== ［命令簿をPDFで保存］（命令簿の保存シート・目次）：所属長の確認済みの超過勤務等命令簿を、1人1か月1ファイルの PDF で保管する =====
+' 超過勤務の読み込みシートの表（超勤_月）で状況が「確認済み」の月を、休暇申請シートを読み取り専用で開いて、その月のシート（超勤 R8.11 など）を PDF にする。
+' 保存した記録（命令簿の保存シートの6行目から）に、シートの内容から作った文字（内容の記録）を残す。同じ内容なら保存しない。
+' 保存したあとで直された月は、前の PDF を残したまま「…（2）.pdf」「…（3）.pdf」の名前で保存する。
+Private Const OT_LOG As String = "命令簿の保存"
+Private Const OT_LOG_FIRST As Long = 6         ' 記録の最初の行（5行目は見出し）
+Private Const OT_PDF_DIR As String = "超過勤務等命令簿"     ' 保存先が空欄のとき：休暇申請シートのフォルダと同じ場所に作るフォルダ
+
+Public Sub SaveOvertimePdfs()
+    Dim lo As ListObject, logWs As Worksheet, outDir As String
+    Set lo = ThisWorkbook.Worksheets("超過勤務の読み込み").ListObjects("超勤_月")
+    If lo.DataBodyRange Is Nothing Then MsgBox "命令簿がありません（目次の［最新を読み込む］を押してください）。", vbExclamation: Exit Sub
+    Set logWs = ThisWorkbook.Worksheets(OT_LOG)
+    outDir = OtPdfDir()
+    If outDir = "" Then Exit Sub
+
+    ' これまでの記録：出勤用ID|年月 → いちばん新しい内容の記録、保存した回数
+    Dim lastHash As Object, times As Object, r As Long, last As Long, k As String
+    Set lastHash = CreateObject("Scripting.Dictionary")
+    Set times = CreateObject("Scripting.Dictionary")
+    last = logWs.Cells(logWs.Rows.Count, 2).End(xlUp).Row
+    For r = OT_LOG_FIRST To last
+        k = IdKey(CStr(logWs.Cells(r, 3).Value)) & "|" & CStr(logWs.Cells(r, 2).Value)
+        If k <> "|" Then
+            lastHash(k) = CStr(logWs.Cells(r, 7).Value)
+            times(k) = times(k) + 1
+        End If
+    Next r
+    If last < OT_LOG_FIRST - 1 Then last = OT_LOG_FIRST - 1
+
+    Dim i As Long, ym As String, id As String, nm As String, fileName As String, sheetName As String
+    Dim books As Object, wb As Workbook, opened As Boolean, ws As Worksheet, h As String, n As Long, fname As String
+    Dim saved As Long, revised As Long, same As Long, skipped As String, item As Variant, pair As Variant
+    Set books = CreateObject("Scripting.Dictionary")
+    Application.ScreenUpdating = False
+    On Error GoTo Failed
+    For i = 1 To lo.ListRows.Count
+        If CellText(lo, i, "状況") = "確認済み" Then
+            ym = CellText(lo, i, "年月")
+            id = CellText(lo, i, "出勤用ID")
+            nm = CellText(lo, i, "氏名")
+            fileName = CellText(lo, i, "ファイル名")
+            sheetName = OtSheetName(ym)
+            ' 休暇申請シートは1回だけ開く（開けなかったものは Nothing を覚えておく）
+            If Not books.Exists(fileName) Then
+                Set wb = OpenLeaveSheet(fileName, opened, True)
+                If wb Is Nothing Then
+                    skipped = skipped & vbCrLf & "・" & fileName & "（開けませんでした）"
+                    books.Add fileName, Nothing
+                Else
+                    books.Add fileName, Array(wb, opened)
+                End If
+            End If
+            Set ws = Nothing
+            If IsObject(books(fileName)) Then
+                ' Nothing（開けなかった）
+            Else
+                pair = books(fileName)
+                Set wb = pair(0)
+                On Error Resume Next
+                Set ws = wb.Worksheets(sheetName)
+                On Error GoTo Failed
+                If ws Is Nothing Then skipped = skipped & vbCrLf & "・" & fileName & "：「" & sheetName & "」がありません"
+            End If
+            If Not ws Is Nothing Then
+                ' 確認日が今も入っているか（読み込んだあとで消されたら保存しない）
+                If Not IsNumeric(ws.Range("AC69").Value2) Or CStr(ws.Range("AC69").Value2) = "" Then
+                    skipped = skipped & vbCrLf & "・" & nm & "（" & sheetName & "）：確認日がありません（読み込んだあとで消されました）"
+                Else
+                    k = IdKey(id) & "|" & ym
+                    h = SheetHash(ws)
+                    If lastHash.Exists(k) And CStr(lastHash(k)) = h Then
+                        same = same + 1
+                    Else
+                        n = 0
+                        If times.Exists(k) Then n = times(k)
+                        fname = "超過勤務等命令簿　" & Mid$(sheetName, 4) & "　" & id & "　" & nm & IIf(n = 0, "", "（" & (n + 1) & "）") & ".pdf"
+                        ws.ExportAsFixedFormat Type:=xlTypePDF, Filename:=outDir & "\" & fname, _
+                            Quality:=xlQualityStandard, IgnorePrintAreas:=False, OpenAfterPublish:=False
+                        last = last + 1
+                        logWs.Cells(last, 1).Value = Now
+                        logWs.Cells(last, 2).NumberFormat = "@"
+                        logWs.Cells(last, 2).Value = ym
+                        logWs.Cells(last, 3).NumberFormat = "@"
+                        logWs.Cells(last, 3).Value = id
+                        logWs.Cells(last, 4).Value = nm
+                        logWs.Cells(last, 5).Value = ws.Range("AC69").Value
+                        logWs.Cells(last, 6).Value = fname
+                        logWs.Cells(last, 7).NumberFormat = "@"
+                        logWs.Cells(last, 7).Value = h
+                        lastHash(k) = h
+                        times(k) = n + 1
+                        If n = 0 Then saved = saved + 1 Else revised = revised + 1
+                    End If
+                End If
+            End If
+        End If
+    Next i
+Done:
+    On Error Resume Next
+    For Each item In books.Items
+        If Not IsObject(item) Then
+            If item(1) Then item(0).Close SaveChanges:=False
+        End If
+    Next item
+    ThisWorkbook.Activate
+    Application.ScreenUpdating = True
+    MsgBox "確認済みの命令簿を PDF で保存しました。" & vbCrLf & _
+           "　新しく保存：" & saved & " 件" & vbCrLf & _
+           "　直された月を別の名前で保存：" & revised & " 件" & vbCrLf & _
+           "　前に保存した内容と同じなので保存しなかった：" & same & " 件" & vbCrLf & outDir & _
+           IIf(skipped <> "", vbCrLf & vbCrLf & "保存できなかったもの：" & skipped, ""), vbInformation
+    Exit Sub
+Failed:
+    MsgBox "PDF の保存の途中で止まりました：" & Err.Description & vbCrLf & "（ここまでに保存した分は、命令簿の保存シートに記録してあります）", vbExclamation
+    Resume Done
+End Sub
+
+' 2026-11 → 超勤 R8.11（休暇申請シートの月のシートの名前）
+Private Function OtSheetName(ByVal ym As String) As String
+    OtSheetName = "超勤 R" & (CLng(Left$(ym, 4)) - 2018) & "." & CLng(Mid$(ym, 6, 2))
+End Function
+
+' 保存先：命令簿の保存シートの B2。空欄なら、休暇申請シートのフォルダと同じ場所の「超過勤務等命令簿」（なければ作る）
+Private Function OtPdfDir() As String
+    Dim folder As String
+    folder = Trim$(CStr(ThisWorkbook.Worksheets(OT_LOG).Range("B2").Value))
+    If Right$(folder, 1) = "\" Then folder = Left$(folder, Len(folder) - 1)
+    If folder = "" Then
+        folder = LeaveFolder()
+        If folder = "" Or InStrRev(folder, "\") = 0 Then
+            MsgBox "命令簿の保存シートの B2 に保存先のフォルダを入れてください（空欄なら、休暇申請シートの読み込みシートの B2 のフォルダの隣に作ります）。", vbExclamation
+            Exit Function
+        End If
+        folder = Left$(folder, InStrRev(folder, "\") - 1) & "\" & OT_PDF_DIR
+    End If
+    If Dir(folder, vbDirectory) = "" Then
+        On Error Resume Next
+        MkDir folder
+        On Error GoTo 0
+        If Dir(folder, vbDirectory) = "" Then
+            MsgBox "保存先のフォルダがなく、作れませんでした：" & vbCrLf & folder, vbExclamation
+            Exit Function
+        End If
+    End If
+    OtPdfDir = folder
+End Function
+
+' 月のシートの内容（A1:AF72 の表示している値）から作る短い文字。内容が変わると変わる（直されたかどうかを見るため）
+Private Function SheetHash(ws As Worksheet) As String
+    Dim v As Variant, r As Long, c As Long, s As String, j As Long, ch As Long
+    Dim h1 As Double, h2 As Double
+    Const P As Double = 2147483647#
+    v = ws.Range("A1:AF72").Value2
+    For r = 1 To UBound(v, 1)
+        For c = 1 To UBound(v, 2)
+            If IsError(v(r, c)) Then s = "#" Else s = CStr(v(r, c))
+            s = s & Chr$(31)
+            For j = 1 To Len(s)
+                ch = AscW(Mid$(s, j, 1)) And &HFFFF&
+                h1 = h1 * 31# + ch: h1 = h1 - Int(h1 / P) * P
+                h2 = h2 * 131# + ch: h2 = h2 - Int(h2 / P) * P
+            Next j
+        Next c
+    Next r
+    SheetHash = Right$("0000000" & Hex$(CLng(h1)), 8) & Right$("0000000" & Hex$(CLng(h2)), 8)
+End Function
+
 ' ===== ［申告・割振り簿を見る］（フレックスシート）：選んでいる行の単位期間を、その職員の休暇申請シートの「申告・割振り簿」（総務課の様式）で表示する =====
 ' 休暇申請シートは読み取り専用で開き、管理者だけが見るシート（ふだんは非表示）を表示して、単位期間（F5・H5・I5 の年・月・日）にその開始日を入れる。保存はしない
 Private Const FLEX_BOOK As String = "申告・割振り簿"
