@@ -1158,7 +1158,7 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
         権限は <code>staff</code>（職員）または <code>admin</code>（管理者）<br>
         設置場所は、出勤登録してよい場所の名前（QRコード管理の名称。例 <code>K</code>）。2か所以上は <code>K;1</code> のように「;」で区切ります。空欄の人はどこでも登録できます。<br>
         ※ 初回登録時は必ずパスワード変更を促す設定になります（変更後のパスワードは英字・数字・記号をすべて含む${PASSWORD_MIN}文字以上）<br>
-        ※ 登録済みの出勤用IDの行は、設置場所が書いてあればその設置場所だけを置き換えます（パスワード・権限は変えません）
+        ※ 登録済みの出勤用IDの行は、設置場所が書いてあればその設置場所を置き換えます。パスワードは、まだ初回のパスワード変更をしていない人（PW要変更）だけ、CSVの初期パスワードに置き換えます（本人が変えたパスワードと権限は変えません）
       </div>
       <form id="uploadForm" method="POST" action="/admin/users/upload" enctype="multipart/form-data" style="margin-bottom:24px;">
         <div class="form-group">
@@ -1204,7 +1204,7 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
     // 設置場所の名前 → id（名前は QRコード管理の名称。前後の空白は無視）
     const locByName = {};
     for (const l of await query('SELECT id, name FROM qr_locations WHERE is_active = 1')) locByName[l.name.trim()] = l.id;
-    let success = 0, skipped = 0, placed = 0, errors = 0;
+    let success = 0, skipped = 0, placed = 0, repassed = 0, errors = 0;
     const badPlaces = new Set();
     for (const line of lines) {
       const cols = line.trim().split(',');
@@ -1218,10 +1218,17 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
       const unknown = placeNames.filter(n => !(n in locByName));
       if (unknown.length) { unknown.forEach(n => badPlaces.add(n)); errors++; continue; }
       const placeIds = [...new Set(placeNames.map(n => locByName[n]))];
-      const exists = await queryOne('SELECT id FROM users WHERE attendance_code = $1', [code]);
+      const exists = await queryOne('SELECT id, password_hash, must_change_password FROM users WHERE attendance_code = $1', [code]);
       if (exists) {
-        if (placeIds.length) { await setUserLocations(exists.id, placeIds); placed++; }
-        else skipped++;
+        let did = false;
+        // まだ初回のパスワード変更をしていない人だけ、初期パスワードを CSV の値に置き換える（本人が変えたパスワードは上書きしない）
+        if (exists.must_change_password === 1 && !bcrypt.compareSync(pass, exists.password_hash)) {
+          await query('UPDATE users SET password_hash = $1, failed_attempts = 0, locked_until = NULL WHERE id = $2',
+            [bcrypt.hashSync(pass, 10), exists.id]);
+          repassed++; did = true;
+        }
+        if (placeIds.length) { await setUserLocations(exists.id, placeIds); placed++; did = true; }
+        if (!did) skipped++;
         continue;
       }
       try {
@@ -1234,7 +1241,7 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
         success++;
       } catch (e) { errors++; }
     }
-    const summary = `登録成功:${success}名 / 設置場所を置き換え:${placed}名 / スキップ:${skipped}名 / エラー:${errors}件`
+    const summary = `登録成功:${success}名 / 初期パスワードを置き換え:${repassed}名 / 設置場所を置き換え:${placed}名 / スキップ:${skipped}名 / エラー:${errors}件`
       + (badPlaces.size ? `（見つからない設置場所：${[...badPlaces].join('・')}）` : '');
     await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'CSV_UPLOAD', summary, req.ip);
     res.redirect(`/admin/users?result=${encodeURIComponent(summary)}`);
