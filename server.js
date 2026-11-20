@@ -144,6 +144,23 @@ async function alreadyRegisteredPage(req, first, loc) {
   `, { role: req.session.role });
 }
 
+// データベースの日時（UTC）を日本時間の「2026/11/20 16:01:32」に。読めなければそのまま返す
+function formatJstSec(v) {
+  if (!v) return '';
+  let s = v;
+  if (!(v instanceof Date)) {
+    s = String(v).trim().replace(/\s*\([^)]*\)$/, '');                       // 「(日本標準時)」などを外す
+    if (/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d(:\d\d(\.\d+)?)?(\+00(:?00)?)?$/.test(s)) {  // データベースの形はUTC
+      s = s.replace(' ', 'T').replace(/\+00(:?00)?$/, '') + 'Z';
+    }
+  }
+  const t = new Date(s);
+  if (isNaN(t)) return String(v);
+  const d = new Date(t.getTime() + 9 * 60 * 60 * 1000);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
 // ISO の日時を日本時間の「2026/11/18 9:05」に
 function formatJst(iso) {
   const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
@@ -1448,23 +1465,24 @@ app.get('/admin/logs', requireAdmin, async (req, res) => {
   const rows = logs.map(l => `
     <tr>
       <td style="padding:14px 12px; white-space:nowrap;">${l.id}</td>
-      <td style="padding:14px 12px; white-space:nowrap;">${l.created_at}</td>
-      <td style="padding:14px 12px;">${l.attendance_code||'-'}</td>
-      <td style="padding:14px 12px;">${roleLabel[l.role] || l.role || '-'}</td>
-      <td style="padding:14px 12px;">${actionLabel[l.action] || l.action}</td>
-      <td style="padding:14px 12px;">${l.detail||'-'}</td>
-      <td style="padding:14px 12px; font-size:0.8rem;">${l.ip_address||'-'}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">${escapeHtml(formatJstSec(l.created_at))}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">${escapeHtml(l.attendance_code||'-')}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">${escapeHtml(roleLabel[l.role] || l.role || '-')}</td>
+      <td style="padding:14px 12px; min-width:15em;">${escapeHtml(actionLabel[l.action] || l.action)}</td>
+      <td style="padding:14px 12px; min-width:22em;">${escapeHtml(l.detail||'-')}</td>
+      <td style="padding:14px 12px; font-size:0.8rem; white-space:nowrap;">${escapeHtml(l.ip_address||'-')}</td>
     </tr>`).join('');
   res.send(layout('操作ログ', `
+    <style>main { max-width: 1040px; }</style>
     <div class="card">
       <p style="margin-bottom:16px;">
         <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
       </p>
       <h2>操作ログ（最新300件）</h2>
       <div class="table-wrapper">
-        <table>
+        <table style="min-width:62em;">
           <thead>
-            <tr>
+            <tr style="white-space:nowrap;">
               <th style="padding:12px 14px;">ID</th>
               <th style="padding:12px 14px;">日時</th>
               <th style="padding:12px 14px;">出勤用ID</th>
