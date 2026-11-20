@@ -1108,7 +1108,17 @@ app.get('/admin/qr/print/:token', requireAdmin, async (req, res) => {
 
 // ===== 管理者：ユーザー管理 =====
 app.get('/admin/users', requireAdmin, async (req, res) => {
-  const result = req.query.result ? decodeURIComponent(req.query.result) : '';
+  // 結果の文には CSV の中身（権限・設置場所の文字）が入るので、必ず文字として表示する
+  const result = typeof req.query.result === 'string' ? req.query.result : '';
+  let resultHtml = '';
+  if (result) {
+    const m = result.match(/^(.*?)（(\d+行目：.*)）$/);   // エラーの行があれば、1行ずつ並べる
+    const head = escapeHtml(m ? m[1] : result);
+    const rows = m ? m[2].split('、').map(r => `<li>${escapeHtml(r)}</li>`).join('') : '';
+    resultHtml = m
+      ? `<div class="message message-warning">⚠️ ${head}<ul style="margin:8px 0 0 20px;">${rows}</ul></div>`
+      : `<div class="message message-success">✅ ${head}</div>`;
+  }
   const users = await query(`SELECT id, attendance_code, role, is_active, failed_attempts, locked_until, must_change_password, created_at FROM users ORDER BY is_active DESC, attendance_code`);
   // 職員ごとの設置場所（名前を「・」でつないだもの）
   const placeRows = await query(
@@ -1152,7 +1162,7 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
         <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
       </p>
       <h2>CSVで一括登録</h2>
-      ${result ? `<div class="message message-success">✅ ${result}</div>` : ''}
+      ${resultHtml}
       <div class="message message-info" style="font-size:0.85rem;">
         CSVファイルの形式：<strong>出勤用ID,パスワード,権限,設置場所</strong>（設置場所は省略できます）<br>
         権限は <code>staff</code>（職員）または <code>admin</code>（管理者）<br>
@@ -1182,6 +1192,12 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
   `, { role: 'admin' }));
 });
 
+// CSV の文字コード：UTF-8 として読めればそれ、読めなければ Shift_JIS（Excel の「CSV（コンマ区切り）」）
+function decodeCsv(buf) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+  catch (e) { return new TextDecoder('shift_jis').decode(buf); }
+}
+
 // CSVアップロード
 app.post('/admin/users/upload', requireAdmin, (req, res) => {
   let body = '';
@@ -1194,29 +1210,41 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
       if (part.includes('filename=') && part.includes('.csv')) {
         // ファイルの中身は、部分の見出し（Content-Disposition など）の後の空行から
         const headEnd = part.indexOf('\r\n\r\n');
-        csvContent = (headEnd >= 0 ? part.slice(headEnd + 4) : '').replace(/\r\n/g, '\n').replace(/^﻿|^\xEF\xBB\xBF/, '').trim();
+        const raw = Buffer.from(headEnd >= 0 ? part.slice(headEnd + 4) : '', 'binary');
+        csvContent = decodeCsv(raw).replace(/\r\n/g, '\n').replace(/^﻿/, '').trim();
         break;
       }
     }
     if (!csvContent) return res.redirect('/admin/users?result=' + encodeURIComponent('CSVファイルが読み込めませんでした'));
 
-    const lines = csvContent.split('\n').filter(l => l.trim());
+    const lines = csvContent.split('\n');   // 行番号を数えるため、空の行も残す
     // 設置場所の名前 → id（名前は QRコード管理の名称。前後の空白は無視）
     const locByName = {};
     for (const l of await query('SELECT id, name FROM qr_locations WHERE is_active = 1')) locByName[l.name.trim()] = l.id;
-    let success = 0, skipped = 0, placed = 0, repassed = 0, errors = 0;
-    const badPlaces = new Set();
-    for (const line of lines) {
-      const cols = line.trim().split(',');
-      if (cols.length < 2) { errors++; continue; }
-      const code = cols[0].trim();
-      const pass = cols[1].trim();
-      const role = (cols[2] || 'staff').trim();
-      if (!code || !pass || !['staff', 'admin'].includes(role)) { errors++; continue; }
+    let success = 0, skipped = 0, placed = 0, repassed = 0;
+    const errorRows = [];   // 「3行目：理由」
+    const seen = new Set();
+    for (let n = 0; n < lines.length; n++) {
+      const lineNo = n + 1;
+      const cols = lines[n].split(',').map(c => c.trim());
+      const fail = why => errorRows.push(`${lineNo}行目：${why}`);
+      // 空の行（Excel が末尾に作る「,,,」など）は数えずに飛ばす
+      if (cols.every(c => c === '')) continue;
+      // 1行目の見出しの行も飛ばす
+      if (n === 0 && /出勤用ID|ＩＤ|^id$/i.test(cols[0]) && /パスワード|password/i.test(cols[1] || '')) continue;
+      if (cols.length < 2) { fail('列が足りません（出勤用ID,パスワード が必要です）'); continue; }
+      const code = cols[0];
+      const pass = cols[1];
+      const role = cols[2] || 'staff';
+      if (!code) { fail('出勤用IDが空です'); continue; }
+      if (!pass) { fail(`出勤用ID ${code} のパスワードが空です`); continue; }
+      if (!['staff', 'admin'].includes(role)) { fail(`出勤用ID ${code} の権限「${role}」は staff か admin にしてください`); continue; }
+      if (seen.has(code)) { fail(`出勤用ID ${code} が前の行と重なっています`); continue; }
+      seen.add(code);
       // 4列目：設置場所（「;」区切り）。書いてない行は設置場所を変えない
       const placeNames = (cols[3] || '').split(/[;；]/).map(s => s.trim()).filter(Boolean);
-      const unknown = placeNames.filter(n => !(n in locByName));
-      if (unknown.length) { unknown.forEach(n => badPlaces.add(n)); errors++; continue; }
+      const unknown = placeNames.filter(p => !(p in locByName));
+      if (unknown.length) { fail(`出勤用ID ${code} の設置場所「${unknown.join('・')}」が見つかりません`); continue; }
       const placeIds = [...new Set(placeNames.map(n => locByName[n]))];
       const exists = await queryOne('SELECT id, password_hash, must_change_password FROM users WHERE attendance_code = $1', [code]);
       if (exists) {
@@ -1239,10 +1267,11 @@ app.post('/admin/users/upload', requireAdmin, (req, res) => {
         );
         if (placeIds.length) await setUserLocations(created[0].id, placeIds);
         success++;
-      } catch (e) { errors++; }
+      } catch (e) { errorRows.push(`${lineNo}行目：出勤用ID ${code} を登録できませんでした`); }
     }
-    const summary = `登録成功:${success}名 / 初期パスワードを置き換え:${repassed}名 / 設置場所を置き換え:${placed}名 / スキップ:${skipped}名 / エラー:${errors}件`
-      + (badPlaces.size ? `（見つからない設置場所：${[...badPlaces].join('・')}）` : '');
+    // エラーの行は10件まで書く（多すぎると画面に収まらないため）
+    const summary = `登録成功:${success}名 / 初期パスワードを置き換え:${repassed}名 / 設置場所を置き換え:${placed}名 / スキップ:${skipped}名 / エラー:${errorRows.length}件`
+      + (errorRows.length ? `（${errorRows.slice(0, 10).join('、')}${errorRows.length > 10 ? `、ほか${errorRows.length - 10}件` : ''}）` : '');
     await logOperation(req.session.userId, req.session.attendanceCode, 'admin', 'CSV_UPLOAD', summary, req.ip);
     res.redirect(`/admin/users?result=${encodeURIComponent(summary)}`);
   });
