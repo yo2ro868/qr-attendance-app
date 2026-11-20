@@ -1130,15 +1130,15 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
     const isLocked = u.locked_until && new Date(u.locked_until) > now;
     return `
     <tr style="${!u.is_active ? 'opacity:0.5; background:#f9fafb;' : ''}">
-      <td style="padding:14px 12px;">${u.attendance_code}</td>
-      <td style="padding:14px 12px;">${u.role === 'admin' ? '管理者' : '職員'}</td>
-      <td style="padding:14px 12px;">
-        <span class="badge ${u.is_active ? 'badge-normal' : 'badge-caution'}">${u.is_active ? '有効' : '無効'}</span>
-        ${isLocked ? '<span class="badge badge-caution" style="margin-left:4px;">🔒 ロック中</span>' : ''}
-        ${u.must_change_password ? '<span class="badge" style="background:#fef3c7;color:#92400e;margin-left:4px;">PW要変更</span>' : ''}
+      <td style="padding:14px 12px; white-space:nowrap;">${u.attendance_code}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">${u.role === 'admin' ? '管理者' : '職員'}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">
+        <span class="badge ${u.is_active ? 'badge-normal' : 'badge-caution'}" style="white-space:nowrap;">${u.is_active ? '有効' : '無効'}</span>
+        ${isLocked ? '<span class="badge badge-caution" style="margin-left:4px; white-space:nowrap;">🔒 ロック中</span>' : ''}
+        ${u.must_change_password ? '<span class="badge" style="background:#fef3c7;color:#92400e;margin-left:4px; white-space:nowrap;">PW要変更</span>' : ''}
       </td>
-      <td style="padding:14px 12px;">${places[u.id] ? escapeHtml(places[u.id].join('・')) : '<span style="color:#888;">どこでも</span>'}</td>
-      <td style="padding:14px 12px;">${u.failed_attempts || 0}回</td>
+      <td style="padding:14px 12px; white-space:nowrap;">${places[u.id] ? escapeHtml(places[u.id].join('・')) : '<span style="color:#888;">どこでも</span>'}</td>
+      <td style="padding:14px 12px; white-space:nowrap;">${u.failed_attempts || 0}回</td>
       <td style="padding:14px 12px; white-space:nowrap;">
         <a href="/admin/users/${u.id}/edit" style="color:#4f46e5; font-size:0.85rem; margin-right:10px;">✏️ 編集</a>
         ${isLocked ? `<a href="/admin/users/${u.id}/unlock" style="color:#22c55e; font-size:0.85rem; margin-right:10px;">🔓 ロック解除</a>` : ''}
@@ -1157,7 +1157,15 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
   }).join('');
 
   res.send(layout('ユーザー管理', `
-    <div class="card">
+    <style>
+      /* この画面だけ：青系の文字を減らし、黒に近い文字で読みやすくする */
+      .users-page h2 { color:#1f2937; border-bottom-color:#e5e7eb; }
+      .users-page .message-info { background:#f8fafc; color:#1f2937; border-left-color:#94a3b8; line-height:1.7; }
+      .users-page .message-info code { background:#e5e7eb; color:#111827; padding:0 4px; border-radius:3px; }
+      .users-page th { color:#374151; }
+      .users-page td { color:#1f2937; }
+    </style>
+    <div class="card users-page">
       <p style="margin-bottom:16px;">
         <a href="/admin" class="btn btn-secondary" style="display:inline-block; width:auto;">← 管理者ホームへ</a>
       </p>
@@ -1179,11 +1187,11 @@ app.get('/admin/users', requireAdmin, async (req, res) => {
           📤 アップロードして登録
         </button>
       </form>
-      <h2>登録済みユーザー一覧（${users.length}名）</h2>
+      <h2>登録済み職員一覧（${users.length}名）</h2>
       <div class="table-wrapper">
         <table>
           <thead>
-            <tr><th>出勤用ID</th><th>権限</th><th>状態</th><th>設置場所</th><th>失敗回数</th><th>操作</th></tr>
+            <tr style="white-space:nowrap;"><th>出勤用<br>ID</th><th>権限</th><th>状態</th><th>設置<br>場所</th><th>失敗<br>回数</th><th>操作</th></tr>
           </thead>
           <tbody>${rows || '<tr><td colspan="6" style="text-align:center">データがありません</td></tr>'}</tbody>
         </table>
