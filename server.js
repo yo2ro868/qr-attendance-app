@@ -548,7 +548,7 @@ app.get('/change-password', requireLogin, (req, res) => {
     <div class="card">
       <h2>🔑 パスワード変更</h2>
       ${isForced ? (req.session.passwordReason === 'rule'
-        ? '<div class="message message-warning">⚠️ パスワードの決まりが変わったため、パスワードを変更してください。変更すると、そのまま出勤登録に進めます。</div>'
+        ? '<div class="message message-warning">⚠️ パスワードを変更してください。変更すると、そのまま出勤登録に進めます。</div>'
         : '<div class="message message-warning">⚠️ 初回ログインのため、パスワードを変更してください。</div>') : ''}
       ${msg}${err}
       <div class="message message-info" style="font-size:0.85rem;">${PASSWORD_RULE_TEXT}</div>
