@@ -15,16 +15,7 @@ $xl.DisplayAlerts = $false
 try {
     $wb = $xl.Workbooks.Open($Path)
     # フォーム コントロールのボタン（0 = xlButtonControl）。シートの上のほう、表にかからない行に置く
-    # ［申請を取り込む］は申請一覧シートにだけ置く（目次の［最新を読み込む］と同じマクロ。申請・報告シートの読み込みシートは設定と読み込んだ表だけ）
-    foreach ($place in @(,@('申請一覧', 'A2', 2))) {     # @(,…) で1つの組のまま回す（@(@(…)) だと中身がばらける）
-        $ws = $wb.Worksheets.Item($place[0])
-        $ws.Rows.Item($place[2]).RowHeight = 30
-        $c = $ws.Range($place[1])
-        $btn = $ws.Shapes.AddFormControl(0, $c.Left + 2, $c.Top + 2, 150, 26)
-        $btn.OLEFormat.Object.Caption = '申請を取り込む'
-        $btn.OnAction = 'ImportRequests'
-        $btn.Placement = 3      # セルに合わせて動かさない
-    }
+    # 読み込みのボタンは目次に集める（各シートには置かない。2026-11-20）
     # 目次：E 列の「[ボタン]マクロ名|表示」をボタンに、F 列の「[式]=…」を式にする（make_matching.py が書いておく）
     $ws = $wb.Worksheets.Item('目次')
     foreach ($c in $ws.Range('E1:F80').Cells) {
@@ -55,11 +46,11 @@ try {
     $btn.OLEFormat.Object.Caption = '命令簿をPDFで保存'
     $btn.OnAction = 'SaveOvertimePdfs'
     $btn.Placement = 3
-    # ［名簿の人の行を足す］（休暇等シートの使い方の文の上。AQ1）
+    # ［翌年分の行を追加］（休暇等シートの使い方の文の上。AQ1）
     $ws = $wb.Worksheets.Item('休暇等')
     $c = $ws.Range('AQ1')
     $btn = $ws.Shapes.AddFormControl(0, $c.Left + 2, $c.Top + 12, 170, 26)
-    $btn.OLEFormat.Object.Caption = '名簿の人の行を足す'
+    $btn.OLEFormat.Object.Caption = '翌年分の行を追加'
     $btn.OnAction = 'AddLeaveRows'
     $btn.Placement = 2
     # ［利用予定を書き出す］（利用予定シートの表を、今日の日付のシートに値で書き出す）
@@ -87,7 +78,59 @@ try {
         $btn.Placement = 3
         $x += $b[2] + 8
     }
-    $wb.Worksheets.Item('フレックスの日別').Visible = 0     # ふだんは見ない（照合の注意はフレックスシートに出る）。マクロの取り込み先なので消さない
+    # ふだんは見ないシートは非表示（中身はそのまま。読み込み・照合は裏で動く。シート見出しを右クリック→［再表示］で見られる。2026-11-20）
+    #   フレックスの日別：照合の注意はフレックスシートに出る。QR出勤・申請・報告シート・フレックスの読み込み：読んだそのままの表（結果は各一覧と目次に出る）
+#   超過勤務の読み込み・日別：確認待ちは超過勤務シートの H2、日ごとの注意は超過勤務シートの「注意」の列に出る
+    foreach ($n in @('フレックスの日別', 'QR出勤の読み込み', '申請・報告シートの読み込み', 'フレックスの読み込み', '超過勤務の読み込み', '超過勤務の日別')) { $wb.Worksheets.Item($n).Visible = 0 }
+    # シートの名前を、まとまりと作業の順の名前に付け直す（2026-11-20。例 超過勤務の読み込み → 超勤確認状況）。
+    # 式・定義した名前・入力規則・条件付き書式は Excel が自動で直す。目次のリンク（SubAddress）と表示、説明の文の「…」「…シート」はここで直す（長い名前から）
+    $rename = @(
+        @('申請・報告シートの読み込み', '休暇読み込み'),
+        @('フレックスの読み込み', 'フレックス読み込み'),
+        @('QR出勤の読み込み', '出勤QR読み込み'),
+        @('超過勤務の読み込み', '超勤確認状況'),
+        @('フレックスの日別', 'フレックス日別照合'),
+        @('出力データ貼付', '出勤①データ貼付'),
+        @('テレワーク一覧', 'テレワーク①予定一覧'),
+        @('テレワーク報告', 'テレワーク②実施報告'),
+        @('超過勤務の日別', '超勤日別照合'),
+        @('命令簿の保存', '超勤②PDF保存'),
+        @('フレックス', 'フレックス①承認状況'),
+        @('照合結果', '出勤②照合結果'),
+        @('月次一覧', '出勤③月次一覧'),
+        @('一括印刷', '出勤⑤一括印刷'),
+        @('申請一覧', '休暇①申請一覧'),
+        @('超過勤務', '超勤①転記・月計'),
+        @('利用予定', 'フレックス②利用予定'),
+        @('職員名簿', '台帳①職員名簿'),
+        @('出勤簿', '出勤④出勤簿'),
+        @('休暇等', '休暇②個人別一覧'),
+        @('祝日', '台帳②祝日'))
+    foreach ($p in $rename) { $wb.Worksheets.Item($p[0]).Name = $p[1] }
+    foreach ($ws in $wb.Worksheets) {
+        foreach ($h in $ws.Hyperlinks) {
+            $sa = [string]$h.SubAddress
+            foreach ($p in $rename) { if ($sa.StartsWith("'" + $p[0] + "'!")) { $h.SubAddress = "'" + $p[1] + "'!" + $sa.Substring($p[0].Length + 3); break } }
+            $tx = [string]$h.Range.Value2
+            foreach ($p in $rename) { if ($tx -eq $p[0]) { $h.Range.Value2 = $p[1]; $h.TextToDisplay = $p[1]; break } }
+        }
+        # セルを1つずつ聞くと何時間もかかるので、使っている範囲の式・文字をまとめて読み、変わるセルだけ書く
+        $used = $ws.UsedRange
+        $all = $used.Formula
+        if ($all -isnot [array]) { $one = New-Object 'object[,]' 1, 1; $one[0, 0] = $all; $all = $one }
+        $r0 = $used.Row; $c0 = $used.Column
+        $lb1 = $all.GetLowerBound(0); $lb2 = $all.GetLowerBound(1)
+        for ($i = $lb1; $i -le $all.GetUpperBound(0); $i++) {
+            for ($j = $lb2; $j -le $all.GetUpperBound(1); $j++) {
+                $v = $all[$i, $j]
+                if ($v -is [string] -and -not $v.StartsWith('=') -and ($v.Contains('「') -or $v.Contains('シート'))) {
+                    $nv = $v
+                    foreach ($p in $rename) { $nv = $nv.Replace('「' + $p[0] + '」', '「' + $p[1] + '」').Replace($p[0] + 'シート', $p[1] + 'シート').Replace($p[0] + ' シート', $p[1] + ' シート') }
+                    if ($nv -ne $v) { $ws.Cells.Item($r0 + $i - $lb1, $c0 + $j - $lb2).Value2 = $nv }
+                }
+            }
+        }
+    }
     $wb.Worksheets.Item(1).Activate()
     if (Test-Path $Out) { Remove-Item $Out }
     $wb.SaveAs($Out, 52)   # 52 = マクロ有効ブック（.xlsm）

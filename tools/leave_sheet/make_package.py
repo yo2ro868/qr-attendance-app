@@ -3,7 +3,7 @@
 使い方: python make_package.py [出力先フォルダ]
 出力先を省略するとプロジェクト直下に 休暇申請一式（フォルダ）と 休暇申請一式.zip を作る（同じ名前は作り直し）。
 中身：手順書.html（休暇・フレックス・テレワーク・超過勤務をまとめた、目次つきの1つの手順書。管理者向け）、申請・報告シート（ひな形）.xlsx、
-      申請・報告シートの作成.xlsm と 申請・報告シートの作成.bas（職員分の申請・報告シートを作るマクロ）、休暇集計.xlsx（申請一覧）、
+      申請・報告シートの作成.xlsm と 申請・報告シートの作成.bas（職員分の申請・報告シートを作るマクロ）、
       出勤・休暇管理データ.xlsm と 出勤・休暇管理データのマクロ.bas、テレワーク予定表（ひな形）.xlsx（tools/telework）、
       QRコード出勤管理 利用者マニュアル.docx（QR出勤管理アプリの職員向けの使い方。Git の外：プロジェクト直下か、前に作った一式のフォルダにあれば入れる）
 職員・所属長に配る手順書（申請者向け・所属長向け）は、別の文書（claude.ai の文書。Word・PDF に書き出して配る）が正本なので、一式には入れない。
@@ -12,7 +12,7 @@
 いちばん新しい月のシートを「超勤ひな形」として入れる（tools/overtime/add_overtime_sheet.ps1）。
 また、プロジェクト直下の 申告・割振り簿（原本）.xlsx（総務課の様式。シートの保護を外したもの。Git には入れない）を写して、
 様式どおりの完成版のシート「申告・割振り簿」を入れる（tools/flex/add_flex_book.ps1）。
-休暇集計・出勤・休暇管理データ の Power Query は Excel で入れるので、このPCに Excel が必要。
+出勤・休暇管理データ の Power Query は Excel で入れるので、このPCに Excel が必要。
 """
 import shutil
 import subprocess
@@ -61,7 +61,6 @@ for attempt in range(1, 4):
             raise
         print(f"ひな形の作成に失敗しました。作り直します（{attempt + 1}回目）")
 ps(HERE / "build_macro.ps1", "-Out", str(OUT / "申請・報告シートの作成.xlsm"))
-ps(HERE / "build_summary.ps1", "-Out", str(OUT / "休暇集計.xlsx"))
 ps(HERE.parent / "matching_excel" / "build.ps1", "-Out", str(OUT / "出勤・休暇管理データ.xlsm"))
 TELEWORK = HERE.parent / "telework"
 subprocess.run([sys.executable, str(TELEWORK / "make_form.py"), str(OUT / "テレワーク予定表（ひな形）.xlsx")], check=True)

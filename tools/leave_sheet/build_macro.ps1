@@ -18,7 +18,7 @@ try {
     while ($wb.Worksheets.Count -lt 2) { [void]$wb.Worksheets.Add([Type]::Missing, $wb.Worksheets.Item($wb.Worksheets.Count)) }
     $cfg = $wb.Worksheets.Item(1); $cfg.Name = '設定'
     $res = $wb.Worksheets.Item(2); $res.Name = '結果'
-    $wb.Styles.Item('Normal').Font.Name = 'ＭＳ Ｐゴシック'
+    $wb.Styles.Item('Normal').Font.Name = 'BIZ UDPゴシック'
     $wb.Styles.Item('Normal').Font.Size = 10
 
     $cfg.Range('A1').Value2 = '申請・報告シートの作成'

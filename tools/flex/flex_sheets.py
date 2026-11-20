@@ -62,7 +62,7 @@ pcell = lambda col, k: f"{P}!${col}${P_FIRST + k - 1}"         # 期間 k の欄
 # 上の欄（フレックス（単位期間・承認） 3〜6 行目の C 列）：所属・氏名・所属長氏名・異動後の所属長氏名
 P_SECTION, P_NAME, P_BOSS, P_BOSS2 = "C3", "C4", "C5", "C6"
 
-FONT = "ＭＳ Ｐゴシック"
+FONT = "BIZ UDPゴシック"     # 見やすい（ユニバーサルデザイン）。総務課の様式（命令簿・申告・割振り簿）は元のフォントのまま
 f_base = Font(name=FONT, size=10)
 f_small = Font(name=FONT, size=9)
 f_bold = Font(name=FONT, size=10, bold=True)
@@ -128,7 +128,7 @@ def add(wb, MG, OFF_DAYS, LEAVE, TW):
     # ===== フレックス（単位期間・承認） =====
     title(per, "フレックスタイム制　単位期間・承認",
           "黄色：本人が入力　青：所属長が入力　灰色：自動　赤：直すところ・確かめるところ")
-    for col, width in zip("ABCDEFGHI", (6, 11, 11, 12, 20, 11, 8, 11, 34)):
+    for col, width in zip("ABCDEFGHI", (8, 11, 11, 12, 20, 11, 8, 11, 34)):     # A+B に「異動後の所属長氏名」が入る
         per.column_dimensions[col].width = width
     # 上の欄：所属（職員名簿の部・課）・氏名・所属長氏名（職員名簿）は自動。違うときは上書きできる。異動後の所属長氏名は所属長が入れる
     for r, (label, value, fill, unlock) in enumerate([

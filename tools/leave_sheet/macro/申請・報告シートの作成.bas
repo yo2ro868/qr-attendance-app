@@ -1,7 +1,7 @@
 Attribute VB_Name = "LeaveSheetMaker"
 Option Explicit
 ' 申請・報告シートを職員の数だけ作る・全員分を更新する（管理者用。申請・報告シートの作成.xlsm の「設定」シートのボタンから実行する）。
-' 出勤・休暇管理データ の「職員名簿」（出勤用ID・氏名）と「休暇等」シート（年ごとの合計・本年使用の調整）を読み、
+' 出勤・休暇管理データ の「台帳①職員名簿」（出勤用ID・氏名）と「休暇②個人別一覧」シート（年ごとの合計・本年使用の調整）を読み、
 ' 各申請・報告シートの非表示の「管理」シートに 出勤用ID・氏名・年・合計（分）・本年使用の調整（分）を書き込む。
 '   ［申請・報告シートを作成］… 職員名簿の全員について、まだない人の申請・報告シートをひな形から作る（あれば作らない・上書きしない）
 '   ［申請・報告シートを更新］… 作成先にある全員の申請・報告シートの「管理」シートを、休暇等シートの今の値に書き換える
@@ -196,8 +196,8 @@ End Function
 ' ===== 超過勤務等命令簿：古い月のシートを外す =====
 ' 申請・報告シートが月ごとに重くならないように、B10 の月より前の月のシートを外す。外すのは次の3つがそろった月だけ：
 '   ・所属長の確認日（AC69）がある
-'   ・出勤・休暇管理データ の「超過勤務」シート（表 転記_月計）に写してある（［超過勤務を転記］済み）
-'   ・出勤・休暇管理データ の「命令簿の保存」シートに PDF の記録があり、その内容の記録が今のシートと同じ（PDF のあとで直されていない）
+'   ・出勤・休暇管理データ の「超勤①転記・月計」シート（表 転記_月計）に写してある（［超過勤務を転記］済み）
+'   ・出勤・休暇管理データ の「超勤②PDF保存」シートに PDF の記録があり、その内容の記録が今のシートと同じ（PDF のあとで直されていない）
 ' 外す月の翌月のシートの BH1（前月の最終日の退庁時刻を指す式）は、外す前に値にする。外したシートは元に戻せない（PDF が保管用）。
 
 Public Sub RemoveOldOvertimeMonths()
@@ -258,6 +258,15 @@ Public Sub RemoveOldOvertimeMonths()
     MsgBox "外した月のシートは全部で " & total & " 枚です。残した月とその理由は、結果シートで確かめてください。", vbInformation
 End Sub
 
+' 出勤・休暇管理データ のシート（2026-11-20 に名前を付け直した。前の名前の 出勤・休暇管理データ も読む）
+Private Function AdminSheet(src As Workbook, newName As String, oldName As String) As Worksheet
+    On Error Resume Next
+    Set AdminSheet = src.Worksheets(newName)
+    If AdminSheet Is Nothing Then Set AdminSheet = src.Worksheets(oldName)
+    On Error GoTo 0
+    If AdminSheet Is Nothing Then Err.Raise vbObjectError + 5, , "出勤・休暇管理データ に「" & newName & "」シートがありません"
+End Function
+
 ' 出勤・休暇管理データ から、PDF の記録（出勤用ID|年月 → いちばん新しい内容の記録）と、転記済みの 出勤用ID|年月 を読む
 Private Function ReadOvertimeRecords(matchPath As String, pdfs As Object, moved As Object) As Boolean
     Dim src As Workbook, openedHere As Boolean, ws As Worksheet, lo As ListObject, r As Long, last As Long
@@ -269,11 +278,11 @@ Private Function ReadOvertimeRecords(matchPath As String, pdfs As Object, moved 
         openedHere = True
     End If
     On Error Resume Next
-    Set ws = src.Worksheets("命令簿の保存")
-    Set lo = src.Worksheets("超過勤務").ListObjects("転記_月計")
+    Set ws = AdminSheet(src, "超勤②PDF保存", "命令簿の保存")
+    Set lo = AdminSheet(src, "超勤①転記・月計", "超過勤務").ListObjects("転記_月計")
     On Error GoTo 0
     If ws Is Nothing Or lo Is Nothing Then
-        MsgBox "出勤・休暇管理データ に「命令簿の保存」シートか、超過勤務シートの表がありません（新しい 出勤・休暇管理データ にしてください）。", vbExclamation
+        MsgBox "出勤・休暇管理データ に「超勤②PDF保存」シートか、超過勤務シートの表がありません（新しい 出勤・休暇管理データ にしてください）。", vbExclamation
     Else
         last = ws.Cells(ws.Rows.Count, 2).End(xlUp).row
         For r = 6 To last      ' 下の行ほど新しい記録
@@ -1047,12 +1056,12 @@ Private Sub ReadMatching(matchPath As String)
         Set src = Workbooks.Open(Filename:=matchPath, UpdateLinks:=0, ReadOnly:=True)
         openedHere = True
     End If
-    staff = src.Worksheets("職員名簿").Range("A2:O" & STAFF_LAST).Value2     ' C・D は休憩の始め・終わり、J・K は養育する子の数・要介護者の数、L 所属長氏名、M 所属長の所属、N・O 勤務時間管理員の所属・氏名
+    staff = AdminSheet(src, "台帳①職員名簿", "職員名簿").Range("A2:O" & STAFF_LAST).Value2     ' C・D は休憩の始め・終わり、J・K は養育する子の数・要介護者の数、L 所属長氏名、M 所属長の所属、N・O 勤務時間管理員の所属・氏名
     ' C・D は休憩の始め・終わり（短縮の特例の人だけ）
     keys = src.Worksheets("計算用").Range("H2:H" & LEAVE_LAST).Value
     totals = src.Worksheets("計算用").Range("K2:K" & LEAVE_LAST).Value
-    adjust = src.Worksheets("休暇等").Range("H2:I" & LEAVE_LAST).Value     ' B 列は氏名（自動）
-    holidays = src.Worksheets("祝日").Range("A2:A200").Value
+    adjust = AdminSheet(src, "休暇②個人別一覧", "休暇等").Range("H2:I" & LEAVE_LAST).Value     ' B 列は氏名（自動）
+    holidays = AdminSheet(src, "台帳②祝日", "祝日").Range("A2:A200").Value
     carries = src.Worksheets("計算用").Range("J2:J" & LEAVE_LAST).Value
     grants = src.Worksheets("計算用").Range("P2:P" & LEAVE_LAST).Value
     If openedHere Then src.Close SaveChanges:=False

@@ -15,11 +15,11 @@ from openpyxl.worksheet.page import PageMargins
 
 SHEET, PRINT = "テレワーク報告", "テレワーク報告書（保存用）"     # 印刷用のシート（2026-11-19 までは「テレワーク実施報告書」）
 NOWORK_OVERLAP = "・フレックスで割振り済みの「勤務時間を割り振らない日」です（先に確認・割振りされた方が優先）"
-# 休暇との重なりは、テレワーク予定表の予定と照らす（出勤・休暇管理データ の「テレワーク一覧」）。この報告では見ない
+# 休暇との重なりは、テレワーク予定表の予定と照らす（出勤・休暇管理データ の「テレワーク①予定一覧」）。この報告では見ない
 HEAD, ROWS = 6, 200
 FIRST, LAST = HEAD + 1, HEAD + ROWS
 
-FONT = "ＭＳ Ｐゴシック"
+FONT = "BIZ UDPゴシック"     # 見やすい（ユニバーサルデザイン）。総務課の様式（命令簿・申告・割振り簿）は元のフォントのまま
 f_base = Font(name=FONT, size=10)
 f_bold = Font(name=FONT, size=10, bold=True)
 f_head = Font(name=FONT, size=10, bold=True, color="FFFFFF")

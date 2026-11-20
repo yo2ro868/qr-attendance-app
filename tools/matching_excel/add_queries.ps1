@@ -7,7 +7,7 @@ param([Parameter(Mandatory = $true)][string]$Path, [string]$Folder = '', [string
 
 $ErrorActionPreference = 'Stop'
 $Path = [IO.Path]::GetFullPath($Path)
-$sheetQueries = Join-Path $PSScriptRoot '..\leave_sheet\queries'   # 申請・報告シートを読むクエリは休暇集計と同じもの
+$sheetQueries = Join-Path $PSScriptRoot '..\leave_sheet\queries'   # 申請・報告シートを読むクエリ（休暇申請シート・申請データ）は tools/leave_sheet/queries に置く
 $teleworkQueries = Join-Path $PSScriptRoot '..\telework\queries'    # テレワーク予定表を読むクエリ
 $queries = Join-Path $PSScriptRoot 'queries'
 # 接続のみのクエリ（ほかのクエリから使う）。名前 → ファイル
@@ -170,6 +170,27 @@ try {
         $lo.ListColumns.Item($dst.Stamp).Range.ColumnWidth = 16
         $lo.ListColumns.Item('ファイル名').Range.ColumnWidth = 34
     }
+    # 超過勤務シート（転記_月計）に、超過勤務の日別（転記_日別）の注意をまとめる（2026-11-20。日別のシートはふだん非表示）
+    $ws = $wb.Worksheets.Item('超過勤務')
+    $lo = $ws.ListObjects.Item('転記_月計')
+    $nc = $lo.ListColumns.Add(); $nc.Name = '注意のある日'
+    $nc.DataBodyRange.Formula = '=IF([@出勤用ID]="","",COUNTIFS(転記_日別[出勤用ID],[@出勤用ID],転記_日別[年月],[@年月],転記_日別[注意],"?*"))'
+    $nc.Range.ColumnWidth = 14
+    $ws.Range($nc.DataBodyRange.Cells(1), $ws.Cells.Item($nc.DataBodyRange.Row + 3000, $nc.Range.Column)).NumberFormat = '0'     # 隣の列の時間の書式を引き継がないように
+    $nc = $lo.ListColumns.Add(); $nc.Name = '注意'
+    $nc.DataBodyRange.Formula2 = '=IF([@出勤用ID]="","",TEXTJOIN("／",TRUE,IF((転記_日別[出勤用ID]=[@出勤用ID])*(転記_日別[年月]=[@年月])*(転記_日別[注意]<>""),TEXT(転記_日別[日付],"m/d")&" "&転記_日別[注意],"")))'
+    $nc.Range.ColumnWidth = 60
+    $nc.Range.WrapText = $true
+    # 注意のある行を薄い赤に
+    $body = $lo.DataBodyRange
+    $col = $lo.ListColumns.Item('注意のある日').Range.Column
+    $fc = $ws.Range($ws.Cells.Item($body.Row, 1), $ws.Cells.Item($body.Row + 3000, $lo.Range.Column + $lo.ListColumns.Count - 1)).FormatConditions.Add(2, 0, ('=N($' + (($ws.Cells.Item(1, $col).Address($false, $false)) -replace '\d', '') + $body.Row + ')>0'))
+    $fc.Interior.Color = 0xD9E5FC
+    # H2：B2 の月の確認待ちの人（所属部課 氏名）と、ほかの月の確認待ちの数
+    $ws.Range('H2').Formula2 = '=IF(COUNTIFS(超勤_月[年月],TEXT($B$2,"yyyy-mm"),超勤_月[状況],"確認待ち")=0,"なし",COUNTIFS(超勤_月[年月],TEXT($B$2,"yyyy-mm"),超勤_月[状況],"確認待ち")&"人（"&TEXTJOIN("、",TRUE,IF((超勤_月[年月]=TEXT($B$2,"yyyy-mm"))*(超勤_月[状況]="確認待ち"),TRIM(超勤_月[所属部課]&" "&超勤_月[氏名]),""))&"）")&IF(COUNTIF(超勤_月[状況],"確認待ち")>COUNTIFS(超勤_月[年月],TEXT($B$2,"yyyy-mm"),超勤_月[状況],"確認待ち"),"　／　ほかの月の確認待ち "&(COUNTIF(超勤_月[状況],"確認待ち")-COUNTIFS(超勤_月[年月],TEXT($B$2,"yyyy-mm"),超勤_月[状況],"確認待ち"))&" 人・月","")'
+    $ws.Range('H2').Font.Bold = $true
+    $ws.Range('H2').Font.Color = 0x0000C0
+    $ws.Range('H2').VerticalAlignment = -4108
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = '' } }
     if ($TeleworkFolder) { $tw.Range('B2').Value2 = '' }
     $wb.Save()

@@ -1,8 +1,8 @@
 Attribute VB_Name = "MatchingMacro"
 Option Explicit
-' 出勤・休暇管理データ の［最新を読み込む］（目次）・［申請を取り込む］（申請一覧）ボタン：申請・報告シート・テレワーク予定表・
+' 出勤・休暇管理データ の［最新を読み込む］（目次）ボタン：申請・報告シート・テレワーク予定表・
 ' 超過勤務等命令簿・フレックスの申告と割振りを読み直し、休暇等・出勤簿・申請一覧・テレワーク一覧・超過勤務の読み込み・フレックスを最新にする（開いたときには読み直さない）。
-' フレックスは、所属長の承認済みになった単位期間（フレックス一覧の取り込みが「取り込む」）を「フレックスの日別」に写す（承認時の内容として残す）。
+' フレックスは、所属長の承認済みになった単位期間（フレックス一覧の取り込みが「取り込む」）を「フレックス日別照合」に写す（承認時の内容として残す）。
 ' 読み込むのは保存された内容なので、同じ Excel で開いている申請・報告シートに未保存の変更があれば、先に保存するか聞く。
 
 Public Sub ImportRequests()
@@ -25,28 +25,28 @@ Public Sub ImportRequests()
     ThisWorkbook.RefreshAll
     Application.CalculateUntilAsyncQueriesDone
     Dim qrNote As String
-    qrNote = FillQrData()           ' フォルダの QR出勤のファイルを「出力データ貼付」に（フォルダが空欄なら貼り付けた内容のまま）
+    qrNote = FillQrData()           ' フォルダの QR出勤のファイルを「出勤①データ貼付」に（フォルダが空欄なら貼り付けた内容のまま）
     Application.Calculate
     Dim flexTaken As Long
     Application.StatusBar = "承認済みのフレックスを取り込んでいます..."
     flexTaken = TakeFlexSnapshot()
-    ThisWorkbook.Worksheets("申請・報告シートの読み込み").Range("B5").Value = Now
+    ThisWorkbook.Worksheets("休暇読み込み").Range("B5").Value = Now
     FitRows
     Application.StatusBar = False
     Application.Cursor = xlDefault
 
     Dim lo As ListObject, total As Long, waiting As Long, notes As Long
-    Set lo = ThisWorkbook.Worksheets("申請一覧").ListObjects("申請一覧")
+    Set lo = ThisWorkbook.Worksheets("休暇①申請一覧").ListObjects("申請一覧")
     If Not lo.DataBodyRange Is Nothing Then
         total = WorksheetFunction.CountIf(lo.ListColumns("休暇の種類").DataBodyRange, "?*")
         waiting = WorksheetFunction.CountIf(lo.ListColumns("状況").DataBodyRange, "承認待ち")
         notes = WorksheetFunction.CountIf(lo.ListColumns("確認").DataBodyRange, "?*")
     End If
     Dim tele As Long, otWaiting As Long, flexNotes As Long, flexDayNotes As Long
-    flexNotes = CountColumn("フレックス", "フレックス一覧", "注意", "?*")
-    flexDayNotes = CountColumn("フレックスの日別", "確定_フレックス日別", "注意", "?*")
-    tele = CountColumn("テレワーク一覧", "テレワーク一覧", "注意", "?*")
-    otWaiting = CountColumn("超過勤務の読み込み", "超勤_月", "状況", "確認待ち")
+    flexNotes = CountColumn("フレックス①承認状況", "フレックス一覧", "注意", "?*")
+    flexDayNotes = CountColumn("フレックス日別照合", "確定_フレックス日別", "注意", "?*")
+    tele = CountColumn("テレワーク①予定一覧", "テレワーク一覧", "注意", "?*")
+    otWaiting = CountColumn("超勤確認状況", "超勤_月", "状況", "確認待ち")
     MsgBox "最新の内容を読み込みました。" & vbCrLf & vbCrLf & _
            "休暇の申請 " & total & " 件（うち承認待ち " & waiting & " 件、注意のある行 " & notes & " 件）" & vbCrLf & _
            "テレワークの注意 " & tele & " 件" & vbCrLf & _
@@ -61,12 +61,114 @@ Failed:
     MsgBox "取り込めませんでした：" & Err.Description, vbExclamation
 End Sub
 
-' ［超過勤務を転記］ボタン（超過勤務シート）：申請・報告シートの超過勤務等命令簿を読み直し、B2 の月の所属長の確認済みの分を
-' 「超過勤務」シート（1人1か月の計）と「超過勤務の日別」シート（日ごとの行と照合）に値で写す。同じ人・同じ月を前に写していれば置き換える。
+' ===== まとまりごとの読み込み（そのまとまりの表だけを読み直す）。ボタンはどれも目次にある（2026-11-20 に各シートから目次に集めた）。目次の［最新を読み込む］は全部を読み直す =====
+'   ［休暇の申請を読み込む］ImportLeave・［テレワーク予定を読み込む］ImportTelework・［報告を読み込む］ImportTwReports・
+'   ［命令簿を読み込む］ImportOvertime・［フレックスを読み込む］ImportFlex・［QR出勤を読み込む］ImportQr
+
+Public Sub ImportLeave()
+    Dim lo As ListObject, total As Long, waiting As Long, notes As Long
+    If Not RunRefresh("休暇の申請", Array("年休_自動", "月別_自動", "日別_自動", "申請一覧", "利用予定_日別")) Then Exit Sub
+    Set lo = ThisWorkbook.Worksheets("休暇①申請一覧").ListObjects("申請一覧")
+    If Not lo.DataBodyRange Is Nothing Then
+        total = WorksheetFunction.CountIf(lo.ListColumns("休暇の種類").DataBodyRange, "?*")
+        waiting = WorksheetFunction.CountIf(lo.ListColumns("状況").DataBodyRange, "承認待ち")
+        notes = WorksheetFunction.CountIf(lo.ListColumns("確認").DataBodyRange, "?*")
+    End If
+    MsgBox "休暇の申請を読み込みました。" & vbCrLf & "申請 " & total & " 件（うち承認待ち " & waiting & " 件、注意のある行 " & notes & " 件）", vbInformation
+End Sub
+
+Public Sub ImportTelework()
+    If Not RunRefresh("テレワーク予定表", Array("テレワーク一覧", "テレワーク_日別", "利用予定_日別")) Then Exit Sub
+    MsgBox "テレワーク予定表を読み込みました。" & vbCrLf & "注意 " & CountColumn("テレワーク①予定一覧", "テレワーク一覧", "注意", "?*") & " 件", vbInformation
+End Sub
+
+Public Sub ImportTwReports()
+    If Not RunRefresh("テレワーク実施報告", Array("テレワーク報告一覧")) Then Exit Sub
+    MsgBox "テレワーク実施報告を読み込みました。" & vbCrLf & _
+           "確認待ち " & CountColumn("テレワーク②実施報告", "テレワーク報告一覧", "状況", "確認待ち") & " 件、予定なし " & _
+           CountColumn("テレワーク②実施報告", "テレワーク報告一覧", "状況", "予定なし") & " 件", vbInformation
+End Sub
+
+Public Sub ImportOvertime()
+    If Not RunRefresh("超過勤務等命令簿", Array("超勤_月", "超勤_日別")) Then Exit Sub
+    MsgBox "超過勤務等命令簿を読み込みました。" & vbCrLf & "所属長の確認待ち " & CountColumn("超勤確認状況", "超勤_月", "状況", "確認待ち") & " 人・月", vbInformation
+End Sub
+
+Public Sub ImportFlex()
+    Dim taken As Long
+    If Not RunRefresh("フレックス", Array("フレックス_日別", "フレックス一覧", "フレックス_出勤簿", "利用予定_日別")) Then Exit Sub
+    On Error GoTo Failed
+    Application.StatusBar = "承認済みのフレックスを取り込んでいます..."
+    taken = TakeFlexSnapshot()
+    Application.StatusBar = False
+    FitRows
+    MsgBox "フレックスを読み込みました。" & vbCrLf & "今回取り込んだ単位期間 " & taken & " 件、注意 " & CountColumn("フレックス①承認状況", "フレックス一覧", "注意", "?*") & " 件", vbInformation
+    Exit Sub
+Failed:
+    Application.StatusBar = False
+    MsgBox "フレックスを取り込めませんでした：" & Err.Description, vbExclamation
+End Sub
+
+Public Sub ImportQr()
+    Dim note As String
+    If Not RunRefresh("QR出勤の記録", Array("QR出勤ファイル一覧", "QR出勤")) Then Exit Sub
+    note = FillQrData()
+    Application.Calculate
+    If note = "" Then note = "QR出勤のフォルダ（目次）が空欄なので、出力データ貼付に貼り付けた内容をそのまま使います。"
+    MsgBox "QR出勤の記録を読み込みました。" & vbCrLf & note, vbInformation
+End Sub
+
+' 開いている申請・報告シートに保存していない変更があれば、保存するか聞く（読み込むのは保存された内容のため）
+Private Sub AskSaveOpenSheets()
+    Dim wb As Workbook, unsaved As String
+    For Each wb In Workbooks
+        If (wb.Name Like "申請・報告シート[　 _]*" Or wb.Name Like "休暇申請シート[　 _]*" Or wb.Name Like "休暇申請_*") And Not wb.Saved Then unsaved = unsaved & vbCrLf & wb.Name
+    Next wb
+    If unsaved <> "" Then
+        If MsgBox("保存されていない申請・報告シートがあります。保存してから読み込みますか？" & vbCrLf & unsaved & vbCrLf & vbCrLf & _
+                  "［いいえ］を押すと、保存されている内容だけを読み込みます。", vbYesNo + vbQuestion) = vbYes Then
+            For Each wb In Workbooks
+                If (wb.Name Like "申請・報告シート[　 _]*" Or wb.Name Like "休暇申請シート[　 _]*" Or wb.Name Like "休暇申請_*") And Not wb.Saved Then wb.Save
+            Next wb
+        End If
+    End If
+End Sub
+
+' 名前の表（Power Query の表）だけを読み直す。読めなければ知らせて False
+Private Function RunRefresh(what As String, tables As Variant) As Boolean
+    Dim nm As Variant, sh As Worksheet, lo As ListObject
+    AskSaveOpenSheets
+    On Error GoTo Failed
+    Application.Cursor = xlWait
+    For Each nm In tables
+        For Each sh In ThisWorkbook.Worksheets
+            For Each lo In sh.ListObjects
+                If lo.Name = CStr(nm) Then
+                    Application.StatusBar = what & "を読み込んでいます...（" & nm & "）"
+                    lo.QueryTable.Refresh BackgroundQuery:=False
+                End If
+            Next lo
+        Next sh
+    Next nm
+    Application.CalculateUntilAsyncQueriesDone
+    Application.Calculate
+    FitRows
+    Application.StatusBar = False
+    Application.Cursor = xlDefault
+    RunRefresh = True
+    Exit Function
+Failed:
+    Application.StatusBar = False
+    Application.Cursor = xlDefault
+    MsgBox what & "を読み込めませんでした：" & Err.Description, vbExclamation
+End Function
+
+' ［超過勤務を転記］ボタン（超勤①転記・月計シート）：申請・報告シートの超過勤務等命令簿を読み直し、B2 の月の所属長の確認済みの分を
+' 「超勤①転記・月計」シート（1人1か月の計）と「超勤日別照合」シート（日ごとの行と照合）に値で写す。同じ人・同じ月を前に写していれば置き換える。
 ' 確認待ち（命令簿の所属長の確認日が空）の人は写さない。
 Public Sub TransferOvertime()
     Dim ws As Worksheet, ym As String, target As Variant
-    Set ws = ThisWorkbook.Worksheets("超過勤務")
+    Set ws = ThisWorkbook.Worksheets("超勤①転記・月計")
     target = ws.Range("B2").Value
     If Not IsDate(target) Then
         MsgBox "転記する月を B2 に入れてください（例 2026/11）。", vbExclamation
@@ -84,10 +186,10 @@ Public Sub TransferOvertime()
     Application.Cursor = xlDefault
 
     Dim srcMonth As ListObject, srcDay As ListObject, dstMonth As ListObject, dstDay As ListObject
-    Set srcMonth = ThisWorkbook.Worksheets("超過勤務の読み込み").ListObjects("超勤_月")
-    Set srcDay = ThisWorkbook.Worksheets("超過勤務の読み込み").ListObjects("超勤_日別")
+    Set srcMonth = ThisWorkbook.Worksheets("超勤確認状況").ListObjects("超勤_月")
+    Set srcDay = ThisWorkbook.Worksheets("超勤確認状況").ListObjects("超勤_日別")
     Set dstMonth = ws.ListObjects("転記_月計")
-    Set dstDay = ThisWorkbook.Worksheets("超過勤務の日別").ListObjects("転記_日別")
+    Set dstDay = ThisWorkbook.Worksheets("超勤日別照合").ListObjects("転記_日別")
 
     ' その月の確認済み・確認待ちの人
     Dim done As Object, waiting As String, nWaiting As Long, r As Long, before As Long
@@ -131,7 +233,7 @@ Public Sub TransferOvertime()
     Next r
     ws.Activate
     MsgBox Format(target, "yyyy年m月") & "の超過勤務を転記しました（" & done.Count & " 人）。" & vbCrLf & _
-           "注意のある日 " & notes & " 日（「超過勤務の日別」シートの「注意」の列）", vbInformation
+           "注意のある日 " & notes & " 日（このシートの表の「注意」の列）", vbInformation
     Exit Sub
 Failed:
     Application.StatusBar = False
@@ -145,9 +247,9 @@ End Sub
 Private Function TakeFlexSnapshot() As Long
     Dim list As ListObject, src As ListObject, dst As ListObject, keys As Object, r As Long
     On Error Resume Next
-    Set list = ThisWorkbook.Worksheets("フレックス").ListObjects("フレックス一覧")
-    Set src = ThisWorkbook.Worksheets("フレックスの読み込み").ListObjects("フレックス_日別")
-    Set dst = ThisWorkbook.Worksheets("フレックスの日別").ListObjects("確定_フレックス日別")
+    Set list = ThisWorkbook.Worksheets("フレックス①承認状況").ListObjects("フレックス一覧")
+    Set src = ThisWorkbook.Worksheets("フレックス読み込み").ListObjects("フレックス_日別")
+    Set dst = ThisWorkbook.Worksheets("フレックス日別照合").ListObjects("確定_フレックス日別")
     On Error GoTo 0
     If list Is Nothing Or src Is Nothing Or dst Is Nothing Then Exit Function
     If list.DataBodyRange Is Nothing Then Exit Function
@@ -163,7 +265,7 @@ Private Function TakeFlexSnapshot() As Long
     Application.ScreenUpdating = True
     ' 写した内容を読む表（一覧の取り込み・注意、出勤簿の備考）を読み直す
     list.QueryTable.Refresh False
-    ThisWorkbook.Worksheets("申請・報告シートの読み込み").ListObjects("フレックス_出勤簿").QueryTable.Refresh False
+    ThisWorkbook.Worksheets("休暇読み込み").ListObjects("フレックス_出勤簿").QueryTable.Refresh False
     Application.Calculate
     TakeFlexSnapshot = keys.Count
 End Function
@@ -184,7 +286,7 @@ Private Sub ReplaceByKey(dst As ListObject, src As ListObject, keys As Object, k
     ReDim sKey(0 To UBound(keyCols))
     For c = 1 To nCols
         If Not dst.DataBodyRange Is Nothing Then
-            If dst.ListColumns(c).DataBodyRange.Cells(1).HasFormula Then formulas(c) = dst.ListColumns(c).DataBodyRange.Cells(1).Formula
+            If dst.ListColumns(c).DataBodyRange.Cells(1).HasFormula Then formulas(c) = GetFormula(dst.ListColumns(c).DataBodyRange.Cells(1))
         End If
         For k = 1 To src.ListColumns.Count
             If src.ListColumns(k).Name = dst.ListColumns(c).Name Then srcCol(c) = k
@@ -242,7 +344,7 @@ Private Sub ReplaceByKey(dst As ListObject, src As ListObject, keys As Object, k
         Next c
     End If
     For c = 1 To nCols
-        If formulas(c) <> "" Then dst.ListColumns(c).DataBodyRange.Formula = formulas(c)
+        If formulas(c) <> "" Then SetFormula dst.ListColumns(c).DataBodyRange, formulas(c)
     Next c
     If n > 1 Then
         With dst.Sort
@@ -266,30 +368,30 @@ Private Function RowKey(v As Variant, r As Long, cols() As Long) As String
     RowKey = s
 End Function
 
-' ［利用予定を書き出す］（利用予定シート）：利用予定シートの表を、AN9 に指定した別のファイル（なければ作る）の、
+' ［利用予定を書き出す］（フレックス②利用予定シート）：フレックス②利用予定シートの表を、AN9 に指定した別のファイル（なければ作る）の、
 ' 今日の日付の名前のシート（例 11月16日）に値で書き出して保存する（配る用。出勤・休暇管理データの中には作らない）。
 ' 部・課は同じものが続く行を結合し、職員のいない行と、印刷範囲の外の列（隠し列・対象月の欄）とボタンは消す。前に書き出したシートは残す
 Public Sub MakeScheduleSheet()
     Const FIRST_ROW As Long = 6, LAST_COL As String = "AH"
     Dim src As Worksheet, ws As Worksheet, nm As String, n As Long, last As Long, r As Long, e As Long, c As Long
     Dim dest As Workbook, destPath As String, created As Boolean, blank As Worksheet
-    Set src = ThisWorkbook.Worksheets("利用予定")
+    Set src = ThisWorkbook.Worksheets("フレックス②利用予定")
     If Not IsDate(src.Range("AN1").Value) Then
         MsgBox "対象月を AN1 に入れてください（例 2026/11）。", vbExclamation
         Exit Sub
     End If
     destPath = Trim(CStr(src.Range("AN9").Value))
     If destPath = "" Then
-        MsgBox "書き出す先のファイルを AN9 に入れてください（例 C:\共有\フレックス・テレワーク利用予定.xlsx）。", vbExclamation
+        MsgBox "書き出す先のファイルを、目次の「フォルダ・ファイルの場所」の 5 に入れてください（例 C:\共有\フレックス・テレワーク利用予定.xlsx）。", vbExclamation
         Exit Sub
     End If
     If LCase(Right(destPath, 5)) <> ".xlsx" Then destPath = destPath & ".xlsx"
     If InStrRev(destPath, "\") = 0 Then
-        MsgBox "AN9 には、フォルダも含めたファイルの場所を入れてください（例 C:\共有\フレックス・テレワーク利用予定.xlsx）。", vbExclamation
+        MsgBox "書き出す先（目次の 5）には、フォルダも含めたファイルの場所を入れてください（例 C:\共有\フレックス・テレワーク利用予定.xlsx）。", vbExclamation
         Exit Sub
     End If
     If Dir(Left(destPath, InStrRev(destPath, "\") - 1), vbDirectory) = "" Then
-        MsgBox "AN9 のフォルダがありません：" & vbCrLf & Left(destPath, InStrRev(destPath, "\") - 1), vbExclamation
+        MsgBox "書き出す先（目次の 5）のフォルダがありません：" & vbCrLf & Left(destPath, InStrRev(destPath, "\") - 1), vbExclamation
         Exit Sub
     End If
     Application.Calculate
@@ -338,7 +440,7 @@ Public Sub MakeScheduleSheet()
     For c = 4 To 34
         If IsDate(ws.Cells(4, c).Value) Then
             If Weekday(ws.Cells(4, c).Value) = 1 Or Weekday(ws.Cells(4, c).Value) = 7 Or _
-               WorksheetFunction.CountIf(ThisWorkbook.Worksheets("祝日").Range("A2:A200"), ws.Cells(4, c).Value) > 0 Then
+               WorksheetFunction.CountIf(ThisWorkbook.Worksheets("台帳②祝日").Range("A2:A200"), ws.Cells(4, c).Value) > 0 Then
                 ws.Range(ws.Cells(4, c), ws.Cells(last, c)).Interior.Color = RGB(231, 230, 230)
             End If
         End If
@@ -422,8 +524,8 @@ End Function
 Private Sub FitRows()
     Dim nm As Variant, ws As Worksheet, lo As ListObject, lc As ListColumn, w As Double, sh As Shape
     On Error Resume Next
-    For Each nm In Array("申請一覧", "テレワーク一覧", "テレワーク報告", "フレックス", "フレックスの日別", "フレックスの読み込み", _
-                         "超過勤務", "超過勤務の日別", "超過勤務の読み込み")
+    For Each nm In Array("休暇①申請一覧", "テレワーク①予定一覧", "テレワーク②実施報告", "フレックス①承認状況", "フレックス日別照合", "フレックス読み込み", _
+                         "超勤①転記・月計", "超勤日別照合", "超勤確認状況")
         Set ws = Nothing
         Set ws = ThisWorkbook.Worksheets(CStr(nm))
         If Not ws Is Nothing Then
@@ -448,19 +550,20 @@ Private Sub FitRows()
     Next nm
 End Sub
 
-' ［名簿の人の行を足す］（休暇等シート・目次）：年を聞き、職員名簿の全員について、休暇等シートにその年の行（出勤用ID・年）が
+' ［翌年分の行を追加］（休暇②個人別一覧シート・目次）：年を聞き、職員名簿の全員について、休暇②個人別一覧シートにその年の行（出勤用ID・年）が
 ' まだない人の分だけ、いちばん下の行の次から足す（ある人・例の行の人は足さない。手で入れた数字の行は動かさない）
 Public Sub AddLeaveRows()
     Const LAST_ROW As Long = 1001, NAME_LAST As Long = 501
     Dim yr As String, ws As Worksheet, nm As Worksheet, have As Object, r As Long, last As Long, nextRow As Long
     Dim id As String, added As Long, full As Boolean
-    yr = InputBox("職員名簿の全員について、休暇等シートにこの年の行を足します（すでにある人は足しません）。" & vbCrLf & vbCrLf & _
-                  "年（西暦）：", "名簿の人の行を足す", CStr(Year(Date)))
+    yr = InputBox("職員名簿の全員について、休暇②個人別一覧シートにこの年の行を足します（すでにある人は足しません）。" & vbCrLf & _
+                  "ふつうは翌年。年の途中で名簿に人を足したときは今の年を入れます。" & vbCrLf & vbCrLf & _
+                  "年（西暦）：", "翌年分の行を追加", CStr(Year(Date) + 1))
     If yr = "" Then Exit Sub
     If Not IsNumeric(yr) Then MsgBox "年を数字で入れてください（例 2027）。", vbExclamation: Exit Sub
     If Val(yr) < 2000 Or Val(yr) > 2100 Then MsgBox "年を数字で入れてください（例 2027）。", vbExclamation: Exit Sub
-    Set ws = ThisWorkbook.Worksheets("休暇等")
-    Set nm = ThisWorkbook.Worksheets("職員名簿")
+    Set ws = ThisWorkbook.Worksheets("休暇②個人別一覧")
+    Set nm = ThisWorkbook.Worksheets("台帳①職員名簿")
     Set have = CreateObject("Scripting.Dictionary")
     last = 1
     For r = 2 To LAST_ROW
@@ -488,7 +591,7 @@ Public Sub AddLeaveRows()
     ws.Activate
     If added > 0 Then ws.Cells(nextRow - added, 1).Select
     MsgBox yr & " 年の行を " & added & " 人分足しました。" & _
-           IIf(full, vbCrLf & "休暇等シートの行がいっぱいです（" & LAST_ROW & " 行目まで）。古い年の行を整理してください。", "") & _
+           IIf(full, vbCrLf & "休暇②個人別一覧シートの行がいっぱいです（" & LAST_ROW & " 行目まで）。古い年の行を整理してください。", "") & _
            IIf(added > 0, vbCrLf & vbCrLf & "氏名・採用日・退職日は職員名簿から、繰越分は前の年の行から自動で入ります。使い始めの年の繰越分や、本年分を変えるときだけ入れてください。", ""), vbInformation
 End Sub
 
@@ -524,6 +627,19 @@ End Function
 
 ' 写す先の表 dst から、その月・その人たちの行を除き、読み込んだ表 src のその月・その人たちの行を足して、並べ替えて書き直す。
 ' 見出しが同じ名前の列を写す。dst にだけある列：転記日時（今の日時）、式の列（照合。全部の行に同じ式を入れ直す）
+' 式を Formula2（配列のまま）で読み書きする。Formula2 のない古い Excel では Formula
+Private Function GetFormula(c As Range) As String
+    On Error Resume Next
+    GetFormula = CallByName(c, "Formula2", VbGet)
+    If Err.Number <> 0 Then Err.Clear: GetFormula = c.Formula
+End Function
+
+Private Sub SetFormula(r As Range, f As String)
+    On Error Resume Next
+    CallByName r, "Formula2", VbLet, f
+    If Err.Number <> 0 Then Err.Clear: r.Formula = f
+End Sub
+
 Private Sub ReplaceRows(dst As ListObject, src As ListObject, ym As String, ids As Object, stamp As Date, sortKeys As Variant)
     Dim nCols As Long, c As Long, r As Long, k As Long
     nCols = dst.ListColumns.Count
@@ -532,7 +648,7 @@ Private Sub ReplaceRows(dst As ListObject, src As ListObject, ym As String, ids 
     ReDim formulas(1 To nCols)
     ReDim srcCol(1 To nCols)
     For c = 1 To nCols
-        If dst.ListColumns(c).DataBodyRange.Cells(1).HasFormula Then formulas(c) = dst.ListColumns(c).DataBodyRange.Cells(1).Formula
+        If dst.ListColumns(c).DataBodyRange.Cells(1).HasFormula Then formulas(c) = GetFormula(dst.ListColumns(c).DataBodyRange.Cells(1))
         srcCol(c) = 0
         For k = 1 To src.ListColumns.Count
             If src.ListColumns(k).Name = dst.ListColumns(c).Name Then srcCol(c) = k
@@ -592,7 +708,7 @@ Private Sub ReplaceRows(dst As ListObject, src As ListObject, ym As String, ids 
         Next c
     End If
     For c = 1 To nCols
-        If formulas(c) <> "" Then dst.ListColumns(c).DataBodyRange.Formula = formulas(c)
+        If formulas(c) <> "" Then SetFormula dst.ListColumns(c).DataBodyRange, formulas(c)
     Next c
     ' 並べ替え：年月の新しい順、出勤用ID、日付
     If n > 1 Then
@@ -608,7 +724,7 @@ Private Sub ReplaceRows(dst As ListObject, src As ListObject, ym As String, ids 
     End If
 End Sub
 
-' ===== テレワーク実施報告書（テレワーク報告シートの［実施報告書を見る］［実施報告書をPDFで保存］） =====
+' ===== テレワーク実施報告書（テレワーク②実施報告シートの［実施報告書を見る］［実施報告書をPDFで保存］） =====
 ' 報告は、その職員の申請・報告シートの「テレワーク実施報告書」シート（別紙３の様式）で見る。申請・報告シートは読み取り専用で開き、
 ' 印刷する番号（M2）に報告の番号を入れる（保存しないので、申請・報告シートは変わらない）。
 Private Const TW_PRINT As String = "テレワーク報告書（保存用）"
@@ -662,13 +778,13 @@ Public Sub SaveTwReports()
            IIf(skipped <> "", vbCrLf & vbCrLf & "開けなかった申請・報告シート：" & skipped, ""), vbInformation
 End Sub
 
-' テレワーク報告シートで選んでいる、表「テレワーク報告一覧」の行（表の中の何行目か）。なければ説明を出して Nothing
+' テレワーク②実施報告シートで選んでいる、表「テレワーク報告一覧」の行（表の中の何行目か）。なければ説明を出して Nothing
 Private Function TwSelectedRows(lo As ListObject) As Collection
     Dim ws As Worksheet, area As Range, cell As Range, seen As Object, r As Long, result As New Collection, hit As Range
-    Set ws = ThisWorkbook.Worksheets("テレワーク報告")
+    Set ws = ThisWorkbook.Worksheets("テレワーク②実施報告")
     Set lo = ws.ListObjects("テレワーク報告一覧")
     If lo.DataBodyRange Is Nothing Then MsgBox "報告がありません（目次の［最新を読み込む］を押してください）。", vbExclamation: Exit Function
-    If Not ActiveSheet Is ws Then MsgBox "テレワーク報告シートで、報告の行を選んでから押してください。", vbExclamation: Exit Function
+    If Not ActiveSheet Is ws Then MsgBox "テレワーク②実施報告シートで、報告の行を選んでから押してください。", vbExclamation: Exit Function
     Set hit = Intersect(Selection, lo.DataBodyRange)
     If hit Is Nothing Then MsgBox "報告の行（表の中のセル）を選んでから押してください。何件か選ぶときは行をまとめて選びます。", vbExclamation: Exit Function
     Set seen = CreateObject("Scripting.Dictionary")
@@ -693,16 +809,16 @@ Private Function OpenLeaveSheet(ByVal fileName As String, opened As Boolean, Opt
     folder = LeaveFolder()
     path = folder & "\" & fileName
     If folder = "" Or fileName = "" Or Dir(path) = "" Then
-        If Not quiet Then MsgBox "申請・報告シートが見つかりません：" & vbCrLf & path & vbCrLf & "（申請・報告シートの読み込みシートの B2 のフォルダを確かめてください）", vbExclamation
+        If Not quiet Then MsgBox "申請・報告シートが見つかりません：" & vbCrLf & path & vbCrLf & "（目次の「フォルダ・ファイルの場所」の 1 を確かめてください）", vbExclamation
         Exit Function
     End If
     Set OpenLeaveSheet = Workbooks.Open(Filename:=path, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
     opened = True
 End Function
 
-' 申請・報告シートのフォルダ（申請・報告シートの読み込みシートの B2。最後の \ は除く）
+' 申請・報告シートのフォルダ（休暇読み込みシートの B2。最後の \ は除く）
 Private Function LeaveFolder() As String
-    LeaveFolder = Trim(CStr(ThisWorkbook.Worksheets("申請・報告シートの読み込み").Range("B2").Value))
+    LeaveFolder = Trim(CStr(ThisWorkbook.Worksheets("休暇読み込み").Range("B2").Value))
     If Right(LeaveFolder, 1) = "\" Then LeaveFolder = Left(LeaveFolder, Len(LeaveFolder) - 1)
 End Function
 
@@ -734,24 +850,24 @@ Private Function TwPdfDir() As String
     Dim folder As String
     folder = LeaveFolder()
     If folder = "" Or InStrRev(folder, "\") = 0 Then
-        MsgBox "申請・報告シートの読み込みシートの B2 に、申請・報告シートのフォルダを入れてください。", vbExclamation
+        MsgBox "目次の「フォルダ・ファイルの場所」の 1 に、申請・報告シートのフォルダを入れてください。", vbExclamation
         Exit Function
     End If
     TwPdfDir = Left(folder, InStrRev(folder, "\") - 1) & "\" & TW_PDF_DIR
     If Dir(TwPdfDir, vbDirectory) = "" Then MkDir TwPdfDir
 End Function
 
-' ===== ［命令簿をPDFで保存］（命令簿の保存シート・目次）：所属長の確認済みの超過勤務等命令簿を、1人1か月1ファイルの PDF で保管する =====
-' 超過勤務の読み込みシートの表（超勤_月）で状況が「確認済み」の月を、申請・報告シートを読み取り専用で開いて、その月のシート（超勤 R8.11 など）を PDF にする。
-' 保存した記録（命令簿の保存シートの6行目から）に、シートの内容から作った文字（内容の記録）を残す。同じ内容なら保存しない。
+' ===== ［命令簿をPDFで保存］（超勤②PDF保存シート・目次）：所属長の確認済みの超過勤務等命令簿を、1人1か月1ファイルの PDF で保管する =====
+' 超勤確認状況シートの表（超勤_月）で状況が「確認済み」の月を、申請・報告シートを読み取り専用で開いて、その月のシート（超勤 R8.11 など）を PDF にする。
+' 保存した記録（超勤②PDF保存シートの6行目から）に、シートの内容から作った文字（内容の記録）を残す。同じ内容なら保存しない。
 ' 保存したあとで直された月は、前の PDF を残したまま「…（2）.pdf」「…（3）.pdf」の名前で保存する。
-Private Const OT_LOG As String = "命令簿の保存"
+Private Const OT_LOG As String = "超勤②PDF保存"
 Private Const OT_LOG_FIRST As Long = 6         ' 記録の最初の行（5行目は見出し）
 Private Const OT_PDF_DIR As String = "超過勤務等命令簿"     ' 保存先が空欄のとき：申請・報告シートのフォルダと同じ場所に作るフォルダ
 
 Public Sub SaveOvertimePdfs()
     Dim lo As ListObject, logWs As Worksheet, outDir As String
-    Set lo = ThisWorkbook.Worksheets("超過勤務の読み込み").ListObjects("超勤_月")
+    Set lo = ThisWorkbook.Worksheets("超勤確認状況").ListObjects("超勤_月")
     If lo.DataBodyRange Is Nothing Then MsgBox "命令簿がありません（目次の［最新を読み込む］を押してください）。", vbExclamation: Exit Sub
     Set logWs = ThisWorkbook.Worksheets(OT_LOG)
     outDir = OtPdfDir()
@@ -864,7 +980,7 @@ Done:
            IIf(skipped <> "", vbCrLf & vbCrLf & "保存できなかったもの：" & skipped, ""), vbInformation
     Exit Sub
 Failed:
-    MsgBox "PDF の保存の途中で止まりました：" & Err.Description & vbCrLf & "（ここまでに保存した分は、命令簿の保存シートに記録してあります）", vbExclamation
+    MsgBox "PDF の保存の途中で止まりました：" & Err.Description & vbCrLf & "（ここまでに保存した分は、超勤②PDF保存シートに記録してあります）", vbExclamation
     Resume Done
 End Sub
 
@@ -873,7 +989,7 @@ Private Function OtSheetName(ByVal ym As String) As String
     OtSheetName = "超勤 R" & (CLng(Left$(ym, 4)) - 2018) & "." & CLng(Mid$(ym, 6, 2))
 End Function
 
-' 保存先：命令簿の保存シートの B2。空欄なら、申請・報告シートのフォルダと同じ場所の「超過勤務等命令簿」（なければ作る）
+' 保存先：超勤②PDF保存シートの B2。空欄なら、申請・報告シートのフォルダと同じ場所の「超過勤務等命令簿」（なければ作る）
 Private Function OtPdfDir() As String
     Dim folder As String
     folder = Trim$(CStr(ThisWorkbook.Worksheets(OT_LOG).Range("B2").Value))
@@ -881,7 +997,7 @@ Private Function OtPdfDir() As String
     If folder = "" Then
         folder = LeaveFolder()
         If folder = "" Or InStrRev(folder, "\") = 0 Then
-            MsgBox "命令簿の保存シートの B2 に保存先のフォルダを入れてください（空欄なら、申請・報告シートの読み込みシートの B2 のフォルダの隣に作ります）。", vbExclamation
+            MsgBox "目次の「フォルダ・ファイルの場所」の 4 に保存先のフォルダを入れてください（空欄なら、1 のフォルダの隣に作ります）。", vbExclamation
             Exit Function
         End If
         folder = Left$(folder, InStrRev(folder, "\") - 1) & "\" & OT_PDF_DIR
@@ -918,16 +1034,16 @@ Private Function SheetHash(ws As Worksheet) As String
     SheetHash = Right$("0000000" & Hex$(CLng(h1)), 8) & Right$("0000000" & Hex$(CLng(h2)), 8)
 End Function
 
-' ===== ［申告・割振り簿を見る］（フレックスシート）：選んでいる行の単位期間を、その職員の申請・報告シートの「申告・割振り簿」（総務課の様式）で表示する =====
+' ===== ［申告・割振り簿を見る］（フレックス①承認状況シート）：選んでいる行の単位期間を、その職員の申請・報告シートの「申告・割振り簿」（総務課の様式）で表示する =====
 ' 申請・報告シートは読み取り専用で開き、管理者だけが見るシート（ふだんは非表示）を表示して、単位期間（F5・H5・I5 の年・月・日）にその開始日を入れる。保存はしない
 Private Const FLEX_BOOK As String = "申告・割振り簿"
 
 Public Sub ShowFlexPeriod()
     Dim ws As Worksheet, lo As ListObject, hit As Range, r As Long, wb As Workbook, opened As Boolean, bk As Worksheet, d As Variant
-    Set ws = ThisWorkbook.Worksheets("フレックス")
+    Set ws = ThisWorkbook.Worksheets("フレックス①承認状況")
     Set lo = ws.ListObjects("フレックス一覧")
     If lo.DataBodyRange Is Nothing Then MsgBox "単位期間がありません（目次の［最新を読み込む］を押してください）。", vbExclamation: Exit Sub
-    If Not ActiveSheet Is ws Then MsgBox "フレックスシートで、単位期間の行を選んでから押してください。", vbExclamation: Exit Sub
+    If Not ActiveSheet Is ws Then MsgBox "フレックス①承認状況シートで、単位期間の行を選んでから押してください。", vbExclamation: Exit Sub
     Set hit = Intersect(ActiveCell, lo.DataBodyRange)
     If hit Is Nothing Then MsgBox "単位期間の行（表の中のセル）を選んでから押してください。", vbExclamation: Exit Sub
     r = hit.Row - lo.HeaderRowRange.Row
@@ -954,20 +1070,20 @@ Public Sub ShowFlexPeriod()
            "印刷や PDF の保存はこの画面からできます。見終わったら、保存しないで閉じてください。", vbInformation
 End Sub
 
-' ===== QR出勤のフォルダ（出力データ貼付シートの H3） =====
-' フォルダが入っていれば、「QR出勤の読み込み」シートの表 QR出勤（フォルダの attendance.xlsx をつなぎ、同じ記録を1つにしたもの）を、
-' 「出力データ貼付」の A〜E 列（2行目から）に文字で入れ直す。入りきらないとき（5000件を超える）は新しい分だけ。空欄なら何もしない（貼り付けた内容を使う）
+' ===== QR出勤のフォルダ（出勤①データ貼付シートの H3） =====
+' フォルダが入っていれば、「出勤QR読み込み」シートの表 QR出勤（フォルダの attendance.xlsx をつなぎ、同じ記録を1つにしたもの）を、
+' 「出勤①データ貼付」の A〜E 列（2行目から）に文字で入れ直す。入りきらないとき（5000件を超える）は新しい分だけ。空欄なら何もしない（貼り付けた内容を使う）
 Private Function FillQrData() As String
     Const CAP As Long = 5000
     Dim dst As Worksheet, lo As ListObject, n As Long, first As Long, v As Variant, out() As Variant, i As Long, j As Long, files As Long, bad As Long
-    Set dst = ThisWorkbook.Worksheets("出力データ貼付")
+    Set dst = ThisWorkbook.Worksheets("出勤①データ貼付")
     If Trim(CStr(dst.Range("H3").Value)) = "" Then Exit Function
-    files = CountColumn("QR出勤の読み込み", "QR出勤ファイル一覧", "読み取り", "OK")
-    bad = CountColumn("QR出勤の読み込み", "QR出勤ファイル一覧", "読み取り", "<>OK") - CountColumn("QR出勤の読み込み", "QR出勤ファイル一覧", "読み取り", "")
-    Set lo = ThisWorkbook.Worksheets("QR出勤の読み込み").ListObjects("QR出勤")
+    files = CountColumn("出勤QR読み込み", "QR出勤ファイル一覧", "読み取り", "OK")
+    bad = CountColumn("出勤QR読み込み", "QR出勤ファイル一覧", "読み取り", "<>OK") - CountColumn("出勤QR読み込み", "QR出勤ファイル一覧", "読み取り", "")
+    Set lo = ThisWorkbook.Worksheets("出勤QR読み込み").ListObjects("QR出勤")
     If lo.DataBodyRange Is Nothing Then
-        FillQrData = "QR出勤：フォルダに出勤記録のファイルがありません（「出力データ貼付」は前の内容のままです）" & _
-                     IIf(bad > 0, "。読めなかったファイル " & bad & " 件（「QR出勤の読み込み」シート）", "")
+        FillQrData = "QR出勤：フォルダに出勤記録のファイルがありません（「出勤①データ貼付」は前の内容のままです）" & _
+                     IIf(bad > 0, "。読めなかったファイル " & bad & " 件（「出勤QR読み込み」シート）", "")
         Exit Function
     End If
     n = lo.ListRows.Count
@@ -985,7 +1101,7 @@ Private Function FillQrData() As String
         .NumberFormat = "@"
     End With
     dst.Range("A2").Resize(n - first + 1, 5).Value2 = out
-    FillQrData = "QR出勤：" & files & " ファイルから " & (n - first + 1) & " 件を「出力データ貼付」に入れました" & _
+    FillQrData = "QR出勤：" & files & " ファイルから " & (n - first + 1) & " 件を「出勤①データ貼付」に入れました" & _
                  IIf(n > CAP, "（" & CAP & " 件を超えたので、新しい分だけ）", "") & _
-                 IIf(bad > 0, "。読めなかったファイル " & bad & " 件（「QR出勤の読み込み」シート）", "")
+                 IIf(bad > 0, "。読めなかったファイル " & bad & " 件（「出勤QR読み込み」シート）", "")
 End Function
