@@ -283,13 +283,19 @@ def add(wb, MG, OFF_DAYS, LEAVE, TW):
     dv.errorTitle, dv.error = "期間", f"1〜{N_PERIODS} の番号を入れてください（空欄なら今日を含む単位期間）。"
     sin.add_data_validation(dv)
     dv.add("T3")
+    # A6：表示する単位期間（T3）の最初の日の行へ移るリンク（ブックはマクロなしなので、T3 を変えても表は動かない。押すと移る）
+    k_row = f"IFERROR(MATCH({k_start},$B${FIRST}:$B${LAST},0)+{FIRST - 1},\"\")"
+    sin.merge_cells("A6:M6")
+    sin["A6"] = (f'=IF(ISNUMBER({k_row}),HYPERLINK("#\'{SIN}\'!D"&{k_row},"▼ 期間"&{KSEL}&"の最初の日（"&TEXT({k_start},"m/d")&"）の行へ移る（ここを押す）"),"")')
+    sin["A6"].font = Font(name=FONT, size=10, bold=True, color="0563C1", underline="single")
+    sin["A6"].alignment = left
     sin.conditional_formatting.add("T5:AA5", FormulaRule(formula=[f'AND($T$5<>"",$T$5<>"155時間ちょうど")'], fill=fill_bad, font=font_bad))
     sin.conditional_formatting.add("T6:AA6", FormulaRule(formula=[bad_status("$T$6")], fill=fill_bad, font=font_bad))
     # 説明（7 行目）
     sin.merge_cells(f"A7:{CHECK}7")
     sin["A7"] = ("・単位期間（4週間）の開始日と申告年月日は「フレックス（単位期間・承認）」シートに入れます。日ごとに勤務開始・終了と休憩を時と分に分けて書き、"
                  "勤務しない日は時刻を消して備考に「勤務時間を割り振らない日」と書きます。コアタイム（10:00〜12:00）と祝日・年末年始は既定のまま変えません。"
-                 "右上の T3 に期間の番号を入れると、その単位期間の合計が出ます（空欄なら今日を含む期間）。コアタイム免除日など、入力できない欄を変えたいときは総務課へ。")
+                 "右上の T3 に期間の番号を入れると、その単位期間の合計が出ます（空欄なら今日を含む期間）。左の A6 を押すと、その期間の最初の日の行へ移ります。コアタイム免除日など、入力できない欄を変えたいときは総務課へ。")
     sin["A7"].font = f_note
     sin["A7"].alignment = Alignment(wrap_text=True, vertical="center")
     sin.row_dimensions[7].height = 36

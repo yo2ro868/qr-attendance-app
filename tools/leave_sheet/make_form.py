@@ -350,8 +350,15 @@ for i, (label, _, fmt, fill) in enumerate(COLS, start=1):
         if fmt:
             c.number_format = fmt
 ws.row_dimensions[HEAD].height = 28
+# 入力の行の高さは決めない（自動）。ふだんは40ピクセル（30pt）、入力した文字が3行以上に折り返すときは Excel が自動で広げる（短く直すと戻る）。
+# 40ピクセルの下限は、表の右の幅のごく狭い AB 列に置いた大きい空白の文字（BIZ UDPゴシック 26.5pt＝行の高さ 30pt）で作る。
+# 隠した列の文字は行の高さの自動調整に数えられないので、AB 列は隠さず幅を狭くする。式の結果（確認の欄）が長くなっても自動では広がらない
+SPACER = "AB"
+ws.column_dimensions[SPACER].width = 0.5
 for r in range(FIRST, LAST + 1):
-    ws.row_dimensions[r].height = 40     # 3行の文字が入る高さ（長い文は折り返す）
+    c = ws[f"{SPACER}{r}"]
+    c.value = " "
+    c.font = Font(name=FONT, size=26.5)
 # 事由の記入例（休暇の種類ごと。確認の欄に「・事由を書いてください（例：通院、発熱・体調不良）」と出す）
 REASON_EXAMPLES = ['、'.join(REASONS[k][:2]) for k in KINDS]
 
