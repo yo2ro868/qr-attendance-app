@@ -43,11 +43,11 @@ COLS = [
     ("番号", 5, "0", fill_calc),
     ("提出日", 11, "yyyy/m/d", fill_staff),
     ("実施日", 13, "yyyy/m/d", fill_staff),      # 2026/12/31 のような8桁の日付が入る幅
-    ("開始時刻", 8, "h:mm", fill_staff),
-    ("終了時刻", 8, "h:mm", fill_staff),
+    ("開始\n時刻", 8, "h:mm", fill_staff),     # 見出しは時刻の前で改行（Power Query は改行を除いた名前で読む）
+    ("終了\n時刻", 8, "h:mm", fill_staff),
     ("業務内容", 50, None, fill_staff),
     ("備考", 24, None, fill_staff),
-    ("確認日（所属長）", 13, "yyyy/m/d", fill_boss),   # 8桁の日付が入る幅
+    ("確認日\n（所属長）", 13, "yyyy/m/d", fill_boss),   # 8桁の日付が入る幅
     ("所属長コメント", 20, None, fill_boss),
     ("確認", 30, None, fill_calc),
 ]

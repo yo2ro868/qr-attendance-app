@@ -989,10 +989,10 @@ Private Function OtSheetName(ByVal ym As String) As String
     OtSheetName = "超勤 R" & (CLng(Left$(ym, 4)) - 2018) & "." & CLng(Mid$(ym, 6, 2))
 End Function
 
-' 保存先：超勤②PDF保存シートの B2。空欄なら、申請・報告シートのフォルダと同じ場所の「超過勤務等命令簿」（なければ作る）
+' 保存先：目次の D8（名前 命令簿保存先）。空欄なら、申請・報告シートのフォルダと同じ場所の「超過勤務等命令簿」（なければ作る）
 Private Function OtPdfDir() As String
     Dim folder As String
-    folder = Trim$(CStr(ThisWorkbook.Worksheets(OT_LOG).Range("B2").Value))
+    folder = Trim$(CStr(ThisWorkbook.Names("命令簿保存先").RefersToRange.Value))
     If Right$(folder, 1) = "\" Then folder = Left$(folder, Len(folder) - 1)
     If folder = "" Then
         folder = LeaveFolder()
@@ -1070,14 +1070,14 @@ Public Sub ShowFlexPeriod()
            "印刷や PDF の保存はこの画面からできます。見終わったら、保存しないで閉じてください。", vbInformation
 End Sub
 
-' ===== QR出勤のフォルダ（出勤①データ貼付シートの H3） =====
+' ===== QR出勤のフォルダ（目次の D7。名前 QR出勤フォルダ） =====
 ' フォルダが入っていれば、「出勤QR読み込み」シートの表 QR出勤（フォルダの attendance.xlsx をつなぎ、同じ記録を1つにしたもの）を、
 ' 「出勤①データ貼付」の A〜E 列（2行目から）に文字で入れ直す。入りきらないとき（5000件を超える）は新しい分だけ。空欄なら何もしない（貼り付けた内容を使う）
 Private Function FillQrData() As String
     Const CAP As Long = 5000
     Dim dst As Worksheet, lo As ListObject, n As Long, first As Long, v As Variant, out() As Variant, i As Long, j As Long, files As Long, bad As Long
     Set dst = ThisWorkbook.Worksheets("出勤①データ貼付")
-    If Trim(CStr(dst.Range("H3").Value)) = "" Then Exit Function
+    If Trim(CStr(ThisWorkbook.Names("QR出勤フォルダ").RefersToRange.Value)) = "" Then Exit Function
     files = CountColumn("出勤QR読み込み", "QR出勤ファイル一覧", "読み取り", "OK")
     bad = CountColumn("出勤QR読み込み", "QR出勤ファイル一覧", "読み取り", "<>OK") - CountColumn("出勤QR読み込み", "QR出勤ファイル一覧", "読み取り", "")
     Set lo = ThisWorkbook.Worksheets("出勤QR読み込み").ListObjects("QR出勤")

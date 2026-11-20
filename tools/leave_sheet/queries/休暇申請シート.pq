@@ -35,10 +35,12 @@ let
                     in 値(2, "Column2"),
             表 = (名 as text) => let t = Table.SelectRows(ブック, each [Kind] = "Table" and [Item] = 名)
                 in if Table.IsEmpty(t) then null else Table.Buffer(t{0}[Data]),
+            // 見出しの改行（「開始」と「時刻」の間など）を除いた列名にする（古い様式の見出しと同じ名前で読める）
+            改行なし = (t) => if t = null then null else Table.TransformColumnNames(t, each Text.Remove(_, {"#(lf)", "#(cr)"})),
             部分 = 名前の部分(名前)
         in
             [ファイル名 = 名前, 出勤用ID = 部分{0}, 氏名 = 部分{1}, 申請 = 申請, 超勤 = 超勤,
-             フレックス日 = 表("フレックス日別"), フレックス期間 = 表("フレックス期間"), テレワーク報告 = 表("テレワーク報告"),
+             フレックス日 = 表("フレックス日別"), フレックス期間 = 表("フレックス期間"), テレワーク報告 = 改行なし(表("テレワーク報告")),
              報告の所属 = 所属(ブック),
              読み取り = if 部分{0} = "" then "ファイル名から出勤用ID が読めません（申請・報告シート　出勤用ID　氏名.xlsx にしてください）" else "OK"],
     ファイル = 読み取り結果[ファイル],

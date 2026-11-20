@@ -39,9 +39,9 @@ try {
     $btn.OLEFormat.Object.Caption = '超過勤務を転記'
     $btn.OnAction = 'TransferOvertime'
     $btn.Placement = 2      # セルに合わせて動く（列の幅が変わっても B2 に重ならない）
-    # ［命令簿をPDFで保存］（命令簿の保存シートの B2 の保存先の右）
+    # ［命令簿をPDFで保存］（命令簿の保存シートの2行目。保存先のフォルダは目次で入れる）
     $ws = $wb.Worksheets.Item('命令簿の保存')
-    $c = $ws.Range('G2')
+    $c = $ws.Range('A2')
     $btn = $ws.Shapes.AddFormControl(0, $c.Left + 6, $c.Top + 2, 160, 26)
     $btn.OLEFormat.Object.Caption = '命令簿をPDFで保存'
     $btn.OnAction = 'SaveOvertimePdfs'
@@ -78,6 +78,48 @@ try {
         $btn.Placement = 3
         $x += $b[2] + 8
     }
+    # ［目次に戻る］：目次以外の見えるシートに置く（図形にリンクを付けるので、マクロを使わずに動く。印刷はしない。2026-11-20）
+    # 置き場所は、そのシートの上の空いている所。'after:行' は、その行のボタンの右に並べる
+    $back = [ordered]@{
+        '出力データ貼付' = 'G1'; '照合結果' = 'J1'; '月次一覧' = 'A2'; '出勤簿' = 'AE1'; '一括印刷' = 'AE1';
+        '申請一覧' = 'A2'; '休暇等' = 'after:1'; 'テレワーク一覧' = 'A3'; 'テレワーク報告' = 'after:2';
+        '超過勤務' = 'after:2'; '命令簿の保存' = 'after:2'; 'フレックス' = 'after:2'; '利用予定' = 'A2';
+        '職員名簿' = 'Q1'; '祝日' = 'D1'; '使い方' = 'B2'
+    }
+    foreach ($sn in $back.Keys) {
+        $ws = $wb.Worksheets.Item($sn)
+        $at = $back[$sn]
+        if ($at.StartsWith('after:')) {
+            $row = [int]$at.Substring(6)
+            $x = 0; foreach ($sh in $ws.Shapes) { if ($sh.TopLeftCell.Row -eq $row) { $x = [math]::Max($x, $sh.Left + $sh.Width) } }
+            $top = $ws.Rows.Item($row).Top
+            $x += 8
+        } else {
+            $c = $ws.Range($at); $row = $c.Row
+            $x = $c.Left + 4; $top = $c.Top
+        }
+        if ($ws.Rows.Item($row).RowHeight -lt 22) { $ws.Rows.Item($row).RowHeight = 22 }
+        $h = [math]::Min(20, $ws.Rows.Item($row).RowHeight - 4)
+        $y = $top + ($ws.Rows.Item($row).RowHeight - $h) / 2
+        $shp = $ws.Shapes.AddShape(5, $x, $y, 78, $h)      # 5 = 角の丸い四角形
+        $shp.Name = '目次に戻る'
+        $shp.Fill.ForeColor.RGB = 0xF5EEE8                 # 薄い青（BGR）
+        $shp.Line.ForeColor.RGB = 0x5F3A1E
+        $shp.Line.Weight = 0.75
+        $tf = $shp.TextFrame2
+        $tf.MarginLeft = 2; $tf.MarginRight = 2; $tf.MarginTop = 0; $tf.MarginBottom = 0
+        $tf.VerticalAnchor = 3                             # 上下の中央
+        $tf.TextRange.Text = '目次に戻る'
+        $tf.TextRange.Font.Size = 9
+        $tf.TextRange.Font.Bold = -1
+        $tf.TextRange.Font.Name = 'BIZ UDPゴシック'
+        $tf.TextRange.Font.NameFarEast = 'BIZ UDPゴシック'
+        $tf.TextRange.Font.Fill.ForeColor.RGB = 0x5F3A1E
+        $tf.TextRange.ParagraphFormat.Alignment = 2        # 中央
+        $shp.Placement = 3                                 # セルに合わせて動かさない
+        $shp.DrawingObject.PrintObject = $false
+        [void]$ws.Hyperlinks.Add($shp, '', "'目次'!A1", '目次のシートへ')
+    }
     # ふだんは見ないシートは非表示（中身はそのまま。読み込み・照合は裏で動く。シート見出しを右クリック→［再表示］で見られる。2026-11-20）
     #   フレックスの日別：照合の注意はフレックスシートに出る。QR出勤・申請・報告シート・フレックスの読み込み：読んだそのままの表（結果は各一覧と目次に出る）
 #   超過勤務の読み込み・日別：確認待ちは超過勤務シートの H2、日ごとの注意は超過勤務シートの「注意」の列に出る
@@ -109,6 +151,7 @@ try {
     foreach ($p in $rename) { $wb.Worksheets.Item($p[0]).Name = $p[1] }
     foreach ($ws in $wb.Worksheets) {
         foreach ($h in $ws.Hyperlinks) {
+            if ($h.Type -ne 0) { continue }     # 0 = セルのリンク（図形の［目次に戻る］は飛ばす）
             $sa = [string]$h.SubAddress
             foreach ($p in $rename) { if ($sa.StartsWith("'" + $p[0] + "'!")) { $h.SubAddress = "'" + $p[1] + "'!" + $sa.Substring($p[0].Length + 3); break } }
             $tx = [string]$h.Range.Value2

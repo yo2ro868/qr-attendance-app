@@ -19,7 +19,7 @@ $helpers = [ordered]@{
     '申請データ'     = Join-Path $queries '申請データ.pq'
     'テレワーク予定表' = Join-Path $teleworkQueries 'テレワーク予定表.pq'
     'フレックス_確定' = Join-Path $queries 'フレックス_確定.pq'     # 表 確定_フレックス日別（下で作る）を読む
-    'QR出勤_ファイル' = Join-Path $queries 'QR出勤_ファイル.pq'       # 出力データ貼付 H3 のフォルダの attendance.xlsx
+    'QR出勤_ファイル' = Join-Path $queries 'QR出勤_ファイル.pq'       # 目次の QR出勤のフォルダ（名前 QR出勤フォルダ）の attendance.xlsx
 }
 # 超過勤務の支給割合ごとの時間の列（超勤_日別.pq・超勤_月.pq と同じ）と、手当対象時間の列
 $otBuckets = @('125', '150', '150（60H前）', '150（+25）', '150（+15）', '135', '160', '175', '175（+25）', '175（+15）',
@@ -66,8 +66,8 @@ try {
     }
     $cfg = $wb.Worksheets.Item('申請・報告シートの読み込み')
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = $settings[$k] } }
-    $tw = $wb.Worksheets.Item('テレワーク一覧')
-    if ($TeleworkFolder) { $tw.Range('B2').Value2 = $TeleworkFolder }
+    $toc = $wb.Worksheets.Item('目次')
+    if ($TeleworkFolder) { $toc.Range('D6').Value2 = $TeleworkFolder }     # テレワーク予定表のフォルダ（目次の 2）
     foreach ($name in $loaded.Keys) {
         $spec = $loaded[$name]
         $ws = $wb.Worksheets.Item($spec.Sheet)
@@ -192,7 +192,7 @@ try {
     $ws.Range('H2').Font.Color = 0x0000C0
     $ws.Range('H2').VerticalAlignment = -4108
     foreach ($k in $settings.Keys) { if ($settings[$k]) { $cfg.Range($k).Value2 = '' } }
-    if ($TeleworkFolder) { $tw.Range('B2').Value2 = '' }
+    if ($TeleworkFolder) { $toc.Range('D6').Value2 = '' }
     $wb.Save()
     $wb.Close($false)
 } finally {
