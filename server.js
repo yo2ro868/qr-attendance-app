@@ -510,10 +510,20 @@ app.post('/login', async (req, res) => {
   req.session.attendanceCode = user.attendance_code;
   req.session.qrToken = token || null;
   req.session.mustChangePassword = user.must_change_password === 1;
+  req.session.passwordReason = user.must_change_password === 1 ? 'first' : null;
   await logOperation(user.id, user.attendance_code, user.role, 'LOGIN', 'ログイン成功', req.ip);
 
+  // 今の決まり（英字・数字・記号を含む10文字以上）に合わないパスワードは、ここで変更してもらう。
+  // 保存されたパスワードは元に戻せないので、本人が入力したこの時に確かめる
+  if (user.must_change_password !== 1 && passwordProblem(password)) {
+    await query('UPDATE users SET must_change_password = 1 WHERE id = $1', [user.id]);
+    req.session.mustChangePassword = true;
+    req.session.passwordReason = 'rule';
+    await logOperation(user.id, user.attendance_code, user.role, 'PASSWORD_RULE', '決まりに合わないため変更を求めた', req.ip);
+  }
+
   // パスワード変更が必要な場合
-  if (user.must_change_password === 1) {
+  if (req.session.mustChangePassword) {
     return res.redirect('/change-password');
   }
 
@@ -537,7 +547,9 @@ app.get('/change-password', requireLogin, (req, res) => {
   res.send(layout('パスワード変更', `
     <div class="card">
       <h2>🔑 パスワード変更</h2>
-      ${isForced ? '<div class="message message-warning">⚠️ 初回ログインのため、パスワードを変更してください。</div>' : ''}
+      ${isForced ? (req.session.passwordReason === 'rule'
+        ? '<div class="message message-warning">⚠️ パスワードの決まりが変わったため、パスワードを変更してください。変更すると、そのまま出勤登録に進めます。</div>'
+        : '<div class="message message-warning">⚠️ 初回ログインのため、パスワードを変更してください。</div>') : ''}
       ${msg}${err}
       <div class="message message-info" style="font-size:0.85rem;">${PASSWORD_RULE_TEXT}</div>
       <form method="POST" action="/change-password">
@@ -586,6 +598,7 @@ app.post('/change-password', requireLogin, async (req, res) => {
   const hash = bcrypt.hashSync(new_password, 10);
   await query('UPDATE users SET password_hash = $1, must_change_password = 0 WHERE id = $2', [hash, req.session.userId]);
   req.session.mustChangePassword = false;
+  req.session.passwordReason = null;
   await logOperation(req.session.userId, req.session.attendanceCode, req.session.role, 'PASSWORD_CHANGE', '本人によるパスワード変更', req.ip);
 
   const isForced = user.must_change_password === 1;
@@ -1385,7 +1398,8 @@ app.get('/admin/logs', requireAdmin, async (req, res) => {
     WRONG_PLACE: '決められた場所以外での読み取り（記録せず）', USER_LOCATIONS: '設置場所の変更', CSV_UPLOAD: 'CSVアップロード',
     USER_TOGGLE: 'ユーザー有効/無効変更', USER_DELETE: 'ユーザー削除',
     USER_UNLOCK: 'ロック解除', QR_ROTATE: 'QRコードを新しくした', OLD_QR: '使えなくなったQRコードを読んだ',
-    PASSWORD_CHANGE: 'パスワード変更', PASSWORD_RESET: 'パスワード初期化', ROLE_CHANGE: '権限変更', EXCEL_EXPORT: 'Excel出力',
+    PASSWORD_CHANGE: 'パスワード変更', PASSWORD_RESET: 'パスワード初期化',
+    PASSWORD_RULE: '新しい決まりによるパスワード変更の求め', ROLE_CHANGE: '権限変更', EXCEL_EXPORT: 'Excel出力',
   };
   const rows = logs.map(l => `
     <tr>
